@@ -3,8 +3,10 @@
 # found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 cmake_minimum_required(VERSION 3.9)
+
 # Keep the version below in sync with the one in db.h
 project(leveldb VERSION 1.23.0 LANGUAGES C CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # C standard can be overridden when this is used as a sub-project.
 if(NOT CMAKE_C_STANDARD)
@@ -22,13 +24,14 @@ if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_EXTENSIONS OFF)
 endif(NOT CMAKE_CXX_STANDARD)
 
-if (WIN32)
+if(WIN32)
   set(LEVELDB_PLATFORM_NAME LEVELDB_PLATFORM_WINDOWS)
+
   # TODO(cmumford): Make UNICODE configurable for Windows.
   add_definitions(-D_UNICODE -DUNICODE)
-else (WIN32)
+else(WIN32)
   set(LEVELDB_PLATFORM_NAME LEVELDB_PLATFORM_POSIX)
-endif (WIN32)
+endif(WIN32)
 
 option(LEVELDB_BUILD_TESTS "Build LevelDB's unit tests" ON)
 option(LEVELDB_BUILD_BENCHMARKS "Build LevelDB's benchmarks" ON)
@@ -44,6 +47,7 @@ check_library_exists(zstd zstd_compress "" HAVE_ZSTD)
 check_library_exists(tcmalloc malloc "" HAVE_TCMALLOC)
 
 include(CheckCXXSymbolExists)
+
 # Using check_cxx_symbol_exists() instead of check_c_symbol_exists() because
 # we're including the header from C++, and feature detection should use the same
 # compiler language that the project will use later. Principles aside, some
@@ -84,7 +88,7 @@ check_cxx_compiler_flag(-Wthread-safety HAVE_CLANG_THREAD_SAFETY)
 
 # Used by googletest.
 check_cxx_compiler_flag(-Wno-missing-field-initializers
-                        LEVELDB_HAVE_NO_MISSING_FIELD_INITIALIZERS)
+  LEVELDB_HAVE_NO_MISSING_FIELD_INITIALIZERS)
 
 include(CheckCXXSourceCompiles)
 
@@ -120,121 +124,121 @@ include(GNUInstallDirs)
 add_library(leveldb "")
 target_sources(leveldb
   PRIVATE
-    "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
-    "db/builder.cc"
-    "db/builder.h"
-    "db/c.cc"
-    "db/db_impl.cc"
-    "db/db_impl.h"
-    "db/db_iter.cc"
-    "db/db_iter.h"
-    "db/dbformat.cc"
-    "db/dbformat.h"
-    "db/dumpfile.cc"
-    "db/filename.cc"
-    "db/filename.h"
-    "db/log_format.h"
-    "db/log_reader.cc"
-    "db/log_reader.h"
-    "db/log_writer.cc"
-    "db/log_writer.h"
-    "db/memtable.cc"
-    "db/memtable.h"
-    "db/repair.cc"
-    "db/skiplist.h"
-    "db/snapshot.h"
-    "db/table_cache.cc"
-    "db/table_cache.h"
-    "db/version_edit.cc"
-    "db/version_edit.h"
-    "db/version_set.cc"
-    "db/version_set.h"
-    "db/write_batch_internal.h"
-    "db/write_batch.cc"
-    "port/port_stdcxx.h"
-    "port/port.h"
-    "port/thread_annotations.h"
-    "table/block_builder.cc"
-    "table/block_builder.h"
-    "table/block.cc"
-    "table/block.h"
-    "table/filter_block.cc"
-    "table/filter_block.h"
-    "table/format.cc"
-    "table/format.h"
-    "table/iterator_wrapper.h"
-    "table/iterator.cc"
-    "table/merger.cc"
-    "table/merger.h"
-    "table/table_builder.cc"
-    "table/table.cc"
-    "table/two_level_iterator.cc"
-    "table/two_level_iterator.h"
-    "util/arena.cc"
-    "util/arena.h"
-    "util/bloom.cc"
-    "util/cache.cc"
-    "util/coding.cc"
-    "util/coding.h"
-    "util/comparator.cc"
-    "util/crc32c.cc"
-    "util/crc32c.h"
-    "util/env.cc"
-    "util/filter_policy.cc"
-    "util/hash.cc"
-    "util/hash.h"
-    "util/logging.cc"
-    "util/logging.h"
-    "util/mutexlock.h"
-    "util/no_destructor.h"
-    "util/options.cc"
-    "util/random.h"
-    "util/status.cc"
+  "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
+  "db/builder.cc"
+  "db/builder.h"
+  "db/c.cc"
+  "db/db_impl.cc"
+  "db/db_impl.h"
+  "db/db_iter.cc"
+  "db/db_iter.h"
+  "db/dbformat.cc"
+  "db/dbformat.h"
+  "db/dumpfile.cc"
+  "db/filename.cc"
+  "db/filename.h"
+  "db/log_format.h"
+  "db/log_reader.cc"
+  "db/log_reader.h"
+  "db/log_writer.cc"
+  "db/log_writer.h"
+  "db/memtable.cc"
+  "db/memtable.h"
+  "db/repair.cc"
+  "db/skiplist.h"
+  "db/snapshot.h"
+  "db/table_cache.cc"
+  "db/table_cache.h"
+  "db/version_edit.cc"
+  "db/version_edit.h"
+  "db/version_set.cc"
+  "db/version_set.h"
+  "db/write_batch_internal.h"
+  "db/write_batch.cc"
+  "port/port_stdcxx.h"
+  "port/port.h"
+  "port/thread_annotations.h"
+  "table/block_builder.cc"
+  "table/block_builder.h"
+  "table/block.cc"
+  "table/block.h"
+  "table/filter_block.cc"
+  "table/filter_block.h"
+  "table/format.cc"
+  "table/format.h"
+  "table/iterator_wrapper.h"
+  "table/iterator.cc"
+  "table/merger.cc"
+  "table/merger.h"
+  "table/table_builder.cc"
+  "table/table.cc"
+  "table/two_level_iterator.cc"
+  "table/two_level_iterator.h"
+  "util/arena.cc"
+  "util/arena.h"
+  "util/bloom.cc"
+  "util/cache.cc"
+  "util/coding.cc"
+  "util/coding.h"
+  "util/comparator.cc"
+  "util/crc32c.cc"
+  "util/crc32c.h"
+  "util/env.cc"
+  "util/filter_policy.cc"
+  "util/hash.cc"
+  "util/hash.h"
+  "util/logging.cc"
+  "util/logging.h"
+  "util/mutexlock.h"
+  "util/no_destructor.h"
+  "util/options.cc"
+  "util/random.h"
+  "util/status.cc"
 
   # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
   $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/c.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/cache.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/comparator.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/db.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/dumpfile.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/env.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/export.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/filter_policy.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/iterator.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/options.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/slice.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/status.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/table_builder.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/table.h"
-    "${LEVELDB_PUBLIC_INCLUDE_DIR}/write_batch.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/c.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/cache.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/comparator.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/db.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/dumpfile.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/env.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/export.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/filter_policy.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/iterator.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/options.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/slice.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/status.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/table_builder.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/table.h"
+  "${LEVELDB_PUBLIC_INCLUDE_DIR}/write_batch.h"
 )
 
-if (WIN32)
+if(WIN32)
   target_sources(leveldb
     PRIVATE
-      "util/env_windows.cc"
-      "util/windows_logger.h"
+    "util/env_windows.cc"
+    "util/windows_logger.h"
   )
-else (WIN32)
+else(WIN32)
   target_sources(leveldb
     PRIVATE
-      "util/env_posix.cc"
-      "util/posix_logger.h"
+    "util/env_posix.cc"
+    "util/posix_logger.h"
   )
-endif (WIN32)
+endif(WIN32)
 
 # MemEnv is not part of the interface and could be pulled to a separate library.
 target_sources(leveldb
   PRIVATE
-    "helpers/memenv/memenv.cc"
-    "helpers/memenv/memenv.h"
+  "helpers/memenv/memenv.cc"
+  "helpers/memenv/memenv.h"
 )
 
 target_include_directories(leveldb
   PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 set_target_properties(leveldb
@@ -242,41 +246,48 @@ set_target_properties(leveldb
 
 target_compile_definitions(leveldb
   PRIVATE
-    # Used by include/export.h when building shared libraries.
-    LEVELDB_COMPILE_LIBRARY
-    # Used by port/port.h.
-    ${LEVELDB_PLATFORM_NAME}=1
+
+  # Used by include/export.h when building shared libraries.
+  LEVELDB_COMPILE_LIBRARY
+
+  # Used by port/port.h.
+  ${LEVELDB_PLATFORM_NAME}=1
 )
-if (NOT HAVE_CXX17_HAS_INCLUDE)
+
+if(NOT HAVE_CXX17_HAS_INCLUDE)
   target_compile_definitions(leveldb
     PRIVATE
-      LEVELDB_HAS_PORT_CONFIG_H=1
+    LEVELDB_HAS_PORT_CONFIG_H=1
   )
 endif(NOT HAVE_CXX17_HAS_INCLUDE)
 
 if(BUILD_SHARED_LIBS)
   target_compile_definitions(leveldb
     PUBLIC
-      # Used by include/export.h.
-      LEVELDB_SHARED_LIBRARY
+
+    # Used by include/export.h.
+    LEVELDB_SHARED_LIBRARY
   )
 endif(BUILD_SHARED_LIBS)
 
 if(HAVE_CLANG_THREAD_SAFETY)
   target_compile_options(leveldb
     PUBLIC
-      -Werror -Wthread-safety)
+    -Werror -Wthread-safety)
 endif(HAVE_CLANG_THREAD_SAFETY)
 
 if(HAVE_CRC32C)
   target_link_libraries(leveldb crc32c)
 endif(HAVE_CRC32C)
+
 if(HAVE_SNAPPY)
   target_link_libraries(leveldb snappy)
 endif(HAVE_SNAPPY)
+
 if(HAVE_ZSTD)
   target_link_libraries(leveldb zstd)
 endif(HAVE_ZSTD)
+
 if(HAVE_TCMALLOC)
   target_link_libraries(leveldb tcmalloc)
 endif(HAVE_TCMALLOC)
@@ -305,60 +316,65 @@ if(LEVELDB_BUILD_TESTS)
   # GoogleTest triggers a missing field initializers warning.
   if(LEVELDB_HAVE_NO_MISSING_FIELD_INITIALIZERS)
     set_property(TARGET gtest
-        APPEND PROPERTY COMPILE_OPTIONS -Wno-missing-field-initializers)
+      APPEND PROPERTY COMPILE_OPTIONS -Wno-missing-field-initializers)
     set_property(TARGET gmock
-        APPEND PROPERTY COMPILE_OPTIONS -Wno-missing-field-initializers)
+      APPEND PROPERTY COMPILE_OPTIONS -Wno-missing-field-initializers)
   endif(LEVELDB_HAVE_NO_MISSING_FIELD_INITIALIZERS)
 
   add_executable(leveldb_tests "")
   target_sources(leveldb_tests
     PRIVATE
-      # "db/fault_injection_test.cc"
-      # "issues/issue178_test.cc"
-      # "issues/issue200_test.cc"
-      # "issues/issue320_test.cc"
-      "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
-      # "util/env_test.cc"
-      "util/status_test.cc"
-      "util/no_destructor_test.cc"
-      "util/testutil.cc"
-      "util/testutil.h"
+
+    # "db/fault_injection_test.cc"
+    # "issues/issue178_test.cc"
+    # "issues/issue200_test.cc"
+    # "issues/issue320_test.cc"
+    "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
+
+    # "util/env_test.cc"
+    "util/status_test.cc"
+    "util/no_destructor_test.cc"
+    "util/testutil.cc"
+    "util/testutil.h"
   )
+
   if(NOT BUILD_SHARED_LIBS)
     target_sources(leveldb_tests
       PRIVATE
-        "db/autocompact_test.cc"
-        "db/corruption_test.cc"
-        "db/db_test.cc"
-        "db/dbformat_test.cc"
-        "db/filename_test.cc"
-        "db/log_test.cc"
-        "db/recovery_test.cc"
-        "db/skiplist_test.cc"
-        "db/version_edit_test.cc"
-        "db/version_set_test.cc"
-        "db/write_batch_test.cc"
-        "helpers/memenv/memenv_test.cc"
-        "table/filter_block_test.cc"
-        "table/table_test.cc"
-        "util/arena_test.cc"
-        "util/bloom_test.cc"
-        "util/cache_test.cc"
-        "util/coding_test.cc"
-        "util/crc32c_test.cc"
-        "util/hash_test.cc"
-        "util/logging_test.cc"
+      "db/autocompact_test.cc"
+      "db/corruption_test.cc"
+      "db/db_test.cc"
+      "db/dbformat_test.cc"
+      "db/filename_test.cc"
+      "db/log_test.cc"
+      "db/recovery_test.cc"
+      "db/skiplist_test.cc"
+      "db/version_edit_test.cc"
+      "db/version_set_test.cc"
+      "db/write_batch_test.cc"
+      "helpers/memenv/memenv_test.cc"
+      "table/filter_block_test.cc"
+      "table/table_test.cc"
+      "util/arena_test.cc"
+      "util/bloom_test.cc"
+      "util/cache_test.cc"
+      "util/coding_test.cc"
+      "util/crc32c_test.cc"
+      "util/hash_test.cc"
+      "util/logging_test.cc"
     )
   endif(NOT BUILD_SHARED_LIBS)
+
   target_link_libraries(leveldb_tests leveldb gmock gtest gtest_main)
   target_compile_definitions(leveldb_tests
     PRIVATE
-      ${LEVELDB_PLATFORM_NAME}=1
+    ${LEVELDB_PLATFORM_NAME}=1
   )
-  if (NOT HAVE_CXX17_HAS_INCLUDE)
+
+  if(NOT HAVE_CXX17_HAS_INCLUDE)
     target_compile_definitions(leveldb_tests
       PRIVATE
-        LEVELDB_HAS_PORT_CONFIG_H=1
+      LEVELDB_HAS_PORT_CONFIG_H=1
     )
   endif(NOT HAVE_CXX17_HAS_INCLUDE)
 
@@ -370,21 +386,22 @@ if(LEVELDB_BUILD_TESTS)
     add_executable("${test_target_name}" "")
     target_sources("${test_target_name}"
       PRIVATE
-        "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
-        "util/testutil.cc"
-        "util/testutil.h"
+      "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
+      "util/testutil.cc"
+      "util/testutil.h"
 
-        "${test_file}"
+      "${test_file}"
     )
     target_link_libraries("${test_target_name}" leveldb gmock gtest)
     target_compile_definitions("${test_target_name}"
       PRIVATE
-        ${LEVELDB_PLATFORM_NAME}=1
+      ${LEVELDB_PLATFORM_NAME}=1
     )
-    if (NOT HAVE_CXX17_HAS_INCLUDE)
+
+    if(NOT HAVE_CXX17_HAS_INCLUDE)
       target_compile_definitions("${test_target_name}"
         PRIVATE
-          LEVELDB_HAS_PORT_CONFIG_H=1
+        LEVELDB_HAS_PORT_CONFIG_H=1
       )
     endif(NOT HAVE_CXX17_HAS_INCLUDE)
 
@@ -395,12 +412,12 @@ if(LEVELDB_BUILD_TESTS)
 
   if(NOT BUILD_SHARED_LIBS)
     # TODO(costan): This test also uses
-    #               "util/env_{posix|windows}_test_helper.h"
-    if (WIN32)
+    # "util/env_{posix|windows}_test_helper.h"
+    if(WIN32)
       leveldb_test("util/env_windows_test.cc")
-    else (WIN32)
+    else(WIN32)
       leveldb_test("util/env_posix_test.cc")
-    endif (WIN32)
+    endif(WIN32)
   endif(NOT BUILD_SHARED_LIBS)
 endif(LEVELDB_BUILD_TESTS)
 
@@ -416,23 +433,24 @@ if(LEVELDB_BUILD_BENCHMARKS)
     add_executable("${bench_target_name}" "")
     target_sources("${bench_target_name}"
       PRIVATE
-        "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
-        "util/histogram.cc"
-        "util/histogram.h"
-        "util/testutil.cc"
-        "util/testutil.h"
+      "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
+      "util/histogram.cc"
+      "util/histogram.h"
+      "util/testutil.cc"
+      "util/testutil.h"
 
-        "${bench_file}"
+      "${bench_file}"
     )
     target_link_libraries("${bench_target_name}" leveldb gmock gtest benchmark)
     target_compile_definitions("${bench_target_name}"
       PRIVATE
-        ${LEVELDB_PLATFORM_NAME}=1
+      ${LEVELDB_PLATFORM_NAME}=1
     )
-    if (NOT HAVE_CXX17_HAS_INCLUDE)
+
+    if(NOT HAVE_CXX17_HAS_INCLUDE)
       target_compile_definitions("${bench_target_name}"
         PRIVATE
-          LEVELDB_HAS_PORT_CONFIG_H=1
+        LEVELDB_HAS_PORT_CONFIG_H=1
       )
     endif(NOT HAVE_CXX17_HAS_INCLUDE)
   endfunction(leveldb_benchmark)
@@ -442,6 +460,7 @@ if(LEVELDB_BUILD_BENCHMARKS)
   endif(NOT BUILD_SHARED_LIBS)
 
   check_library_exists(sqlite3 sqlite3_open "" HAVE_SQLITE3)
+
   if(HAVE_SQLITE3)
     leveldb_benchmark("benchmarks/db_bench_sqlite3.cc")
     target_link_libraries(db_bench_sqlite3 sqlite3)
@@ -460,13 +479,24 @@ int main() {
   delete db;
   return 0;
 }
-  "  HAVE_KYOTOCABINET)
+  " HAVE_KYOTOCABINET)
   set(CMAKE_REQUIRED_LIBRARIES ${OLD_CMAKE_REQURED_LIBRARIES})
+
   if(HAVE_KYOTOCABINET)
     leveldb_benchmark("benchmarks/db_bench_tree_db.cc")
     target_link_libraries(db_bench_tree_db kyotocabinet)
   endif(HAVE_KYOTOCABINET)
 endif(LEVELDB_BUILD_BENCHMARKS)
+
+# RapidJSON support
+option(LEVELDB_USE_RAPIDJSON "Use RapidJSON for JSON parsing/serialization" ON)
+
+if(LEVELDB_USE_RAPIDJSON)
+  include_directories(
+    "third_party/rapidjson/include"
+  )
+  add_compile_definitions(LEVELDB_RAPIDJSON)
+endif(LEVELDB_USE_RAPIDJSON)
 
 if(LEVELDB_INSTALL)
   install(TARGETS leveldb
@@ -477,21 +507,21 @@ if(LEVELDB_INSTALL)
   )
   install(
     FILES
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/c.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/cache.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/comparator.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/db.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/dumpfile.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/env.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/export.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/filter_policy.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/iterator.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/options.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/slice.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/status.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/table_builder.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/table.h"
-      "${LEVELDB_PUBLIC_INCLUDE_DIR}/write_batch.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/c.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/cache.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/comparator.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/db.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/dumpfile.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/env.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/export.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/filter_policy.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/iterator.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/options.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/slice.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/status.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/table_builder.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/table.h"
+    "${LEVELDB_PUBLIC_INCLUDE_DIR}/write_batch.h"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/leveldb"
   )
 
@@ -512,8 +542,8 @@ if(LEVELDB_INSTALL)
   )
   install(
     FILES
-      "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake"
-      "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake"
+    "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake"
+    "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
   )
 endif(LEVELDB_INSTALL)
