@@ -131,6 +131,13 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     Status s = ExtractKeyFromJSON(value, r->options.secondary_key,
                                   &secondary_key_attr);
     if (!s.ok()) {
+      r->last_key.assign(key.data(), key.size());
+      r->num_entries++;
+      r->data_block.Add(key, value);
+      const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
+      if (estimated_block_size >= r->options.block_size) {
+        Flush();
+      }
       return;
     }
     r->secondary_filter_block->AddKey(secondary_key_attr);

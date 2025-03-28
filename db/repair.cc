@@ -34,6 +34,7 @@
 #include "db/table_cache.h"
 #include "db/version_edit.h"
 #include "db/write_batch_internal.h"
+
 #include "leveldb/comparator.h"
 #include "leveldb/db.h"
 #include "leveldb/env.h"
@@ -177,7 +178,7 @@ class Repairer {
     std::string scratch;
     Slice record;
     WriteBatch batch;
-    MemTable* mem = new MemTable(icmp_);
+    MemTable* mem = new MemTable(icmp_, this->options_.secondary_key);
     mem->Ref();
     int counter = 0;
     while (reader.ReadRecord(&record, &scratch)) {

@@ -10,8 +10,11 @@
 #include "db/skiplist.h"
 #include <string>
 #include <unordered_set>
+#include <util/btree_map.h>
+#include <vector>
 
 #include "leveldb/db.h"
+#include "leveldb/slice.h"
 
 #include "util/arena.h"
 
@@ -24,7 +27,8 @@ class MemTable {
  public:
   // MemTables are reference counted.  The initial reference count
   // is zero and the caller must call Ref() at least once.
-  explicit MemTable(const InternalKeyComparator& comparator);
+  explicit MemTable(const InternalKeyComparator& comparator,
+                    std::string secondary_key);
 
   MemTable(const MemTable&) = delete;
   MemTable& operator=(const MemTable&) = delete;
@@ -65,10 +69,12 @@ class MemTable {
   // Else, return false.
   bool Get(const LookupKey& key, std::string* value, Status* s);
 
-  bool Get(const LookupKey& s_key, std::vector<SKeyReturnVal>* value, Status* s,
+  // Get methods for Secondary Memtable
+  bool Get(const LookupKey& key, std::string* value, Status* s, uint64_t* tag);
+  void Get(const Slice& s_key, SequenceNumber snapshot,
+           std::vector<SKeyReturnVal>* value, Status* s,
            std::string secondary_key,
-           std::unordered_set<std::string>* result_set, int top_k_value,
-           DBImpl* db);
+           std::unordered_set<std::string>* result_set, int top_k_value);
 
  private:
   friend class MemTableIterator;
@@ -88,6 +94,11 @@ class MemTable {
   int refs_;
   Arena arena_;
   Table table_;
+
+  // SECONDARY MEMTABLE
+  typedef btree::btree_map<std::string, std::vector<std::string>*> SecMemTable;
+  SecMemTable secTable_;
+  std::string secAttribute;
 };
 
 }  // namespace leveldb

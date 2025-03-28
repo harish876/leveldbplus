@@ -528,7 +528,7 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
   }
 
   // std::sort(acc->begin(), acc->end(), NewestFirstSequenceNumber);
-  if (acc->size() > 0)
+  if (acc->size() == 0)
     return Status::NotFound(Slice());  // Use an empty error message for speed
   else
     return s;

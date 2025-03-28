@@ -4,23 +4,25 @@
 
 #include "leveldb/table.h"
 
-#include <map>
-#include <string>
-
-#include "gtest/gtest.h"
 #include "db/dbformat.h"
 #include "db/memtable.h"
 #include "db/write_batch_internal.h"
+#include <map>
+#include <string>
+
 #include "leveldb/db.h"
 #include "leveldb/env.h"
 #include "leveldb/iterator.h"
 #include "leveldb/options.h"
 #include "leveldb/table_builder.h"
+
 #include "table/block.h"
 #include "table/block_builder.h"
 #include "table/format.h"
 #include "util/random.h"
 #include "util/testutil.h"
+
+#include "gtest/gtest.h"
 
 namespace leveldb {
 
@@ -302,13 +304,13 @@ class MemTableConstructor : public Constructor {
  public:
   explicit MemTableConstructor(const Comparator* cmp)
       : Constructor(cmp), internal_comparator_(cmp) {
-    memtable_ = new MemTable(internal_comparator_);
+    memtable_ = new MemTable(internal_comparator_, "");  // REVISIT
     memtable_->Ref();
   }
   ~MemTableConstructor() override { memtable_->Unref(); }
   Status FinishImpl(const Options& options, const KVMap& data) override {
     memtable_->Unref();
-    memtable_ = new MemTable(internal_comparator_);
+    memtable_ = new MemTable(internal_comparator_, "");  // REVISIT
     memtable_->Ref();
     int seq = 1;
     for (const auto& kvp : data) {
@@ -724,7 +726,7 @@ TEST_F(Harness, RandomizedLongDB) {
 
 TEST(MemTableTest, Simple) {
   InternalKeyComparator cmp(BytewiseComparator());
-  MemTable* memtable = new MemTable(cmp);
+  MemTable* memtable = new MemTable(cmp, "");  // REVISIT
   memtable->Ref();
   WriteBatch batch;
   WriteBatchInternal::SetSequence(&batch, 100);

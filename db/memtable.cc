@@ -6,11 +6,13 @@
 
 #include "db/db_impl.h"
 #include "db/dbformat.h"
+#include <cstdint>
 #include <unordered_set>
 
 #include "leveldb/comparator.h"
 #include "leveldb/env.h"
 #include "leveldb/iterator.h"
+#include "leveldb/slice.h"
 
 #include "util/coding.h"
 #include "util/json_utils.h"
@@ -24,10 +26,23 @@ static Slice GetLengthPrefixedSlice(const char* data) {
   return Slice(p, len);
 }
 
-MemTable::MemTable(const InternalKeyComparator& comparator)
-    : comparator_(comparator), refs_(0), table_(comparator_, &arena_) {}
+MemTable::MemTable(const InternalKeyComparator& comparator,
+                   std::string secondary_key)
+    : comparator_(comparator), refs_(0), table_(comparator_, &arena_) {
+  secAttribute = secondary_key;
+}
 
-MemTable::~MemTable() { assert(refs_ == 0); }
+MemTable::~MemTable() {
+  assert(refs_ == 0);
+  for (SecMemTable::iterator it = secTable_.begin(); it != secTable_.end();
+       it++) {
+    std::pair<std::string, std::vector<std::string>*> pr = *it;
+
+    std::vector<std::string>* invertedList = pr.second;
+    invertedList->clear();
+    delete invertedList;
+  }
+}
 
 size_t MemTable::ApproximateMemoryUsage() { return arena_.MemoryUsage(); }
 
@@ -103,6 +118,37 @@ void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
   std::memcpy(p, value.data(), val_size);
   assert(p + val_size == buf + encoded_len);
   table_.Insert(buf);
+
+  // SECONDARY MEMTABLE
+  // Ex: { id: 1, age: 30} we add this record with key age=30
+
+  /*
+    secTable_ = {
+        "30": ["1", "2"],
+        "25": ["3"]
+      }
+  */
+  if (type == kTypeDeletion) {
+    return;
+  }
+  std::string secKey;
+  Status st =
+      ExtractKeyFromJSON(value.ToString().c_str(), secAttribute, &secKey);
+  if (!st.ok()) {
+    return;
+  }
+  SecMemTable::const_iterator lookup = secTable_.find(secKey);
+  if (lookup == secTable_.end()) {
+    std::vector<std::string>* invertedList = new std::vector<std::string>();
+    invertedList->push_back(key.ToString());
+
+    secTable_.insert(std::make_pair(secKey, invertedList));
+  }
+
+  else {
+    std::pair<std::string, std::vector<std::string>*> pr = *lookup;
+    pr.second->push_back(key.ToString());
+  }
 }
 
 bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
@@ -141,74 +187,90 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
   return false;
 }
 
-bool MemTable::Get(const LookupKey& s_key, std::vector<SKeyReturnVal>* acc,
-                   Status* s, std::string secondary_key,
-                   std::unordered_set<std::string>* result_set,
-                   int top_k_output, DBImpl* db) {
-  if (secondary_key.empty()) {
-    return false;
-  }
-  Slice memkey = s_key.memtable_key();
+bool MemTable::Get(const LookupKey& key, std::string* value, Status* s,
+                   uint64_t* tag) {
+  Slice memkey = key.memtable_key();
   Table::Iterator iter(&table_);
-  iter.SeekToFirst();
-  bool found;
-
-  // I believe we do a O(n) search for the actual key based on the secondary key
-
-  while (iter.Valid()) {
+  iter.Seek(memkey.data());
+  if (iter.Valid()) {
+    // entry format is:
+    //    klength  varint32
+    //    userkey  char[klength]
+    //    tag      uint64
+    //    vlength  varint32
+    //    value    char[vlength]
+    // Check that it belongs to same user key.  We do not check the
+    // sequence number since the Seek() call above should have skipped
+    // all entries with overly large sequence numbers.
     const char* entry = iter.key();
     uint32_t key_length;
     const char* key_ptr = GetVarint32Ptr(entry, entry + 5, &key_length);
-    const uint64_t tag = DecodeFixed64(key_ptr + key_length - 8);
-    std::string val;
-    switch (static_cast<ValueType>(tag & 0xff)) {
-      case kTypeValue: {
-        Slice v = GetLengthPrefixedSlice(key_ptr + key_length);
-        val.assign(v.data(), v.size());
-        std::string sec_key_attr;
-        Status s = ExtractKeyFromJSON(v, secondary_key, &sec_key_attr);
-        if (!s.ok()) {
-          break;
+    if (comparator_.comparator.user_comparator()->Compare(
+            Slice(key_ptr, key_length - 8), key.user_key()) == 0) {
+      // Correct user key
+      *tag = DecodeFixed64(key_ptr + key_length - 8);
+      switch (static_cast<ValueType>(*tag & 0xff)) {
+        case kTypeValue: {
+          Slice v = GetLengthPrefixedSlice(key_ptr + key_length);
+          value->assign(v.data(), v.size());
+          return true;
         }
-        if (comparator_.comparator.user_comparator()->Compare(
-                sec_key_attr, s_key.user_key()) == 0) {
-          struct SKeyReturnVal new_val;
-          new_val.key = Slice(key_ptr, key_length - 8).ToString();
-          std::string temp;
-
-          if (result_set->find(new_val.key) == result_set->end()) {
-            new_val.value = val;
-            new_val.sequence_number = tag;  // not able to understand this
-
-            if (acc->size() < top_k_output) {
-              Status st = db->Get(leveldb::ReadOptions(), new_val.key, &temp);
-              if (st.ok() && !st.IsNotFound() && temp == new_val.value) {
-                new_val.Push(acc, new_val);
-                result_set->insert(new_val.key);
-              }
-            } else if (new_val.sequence_number > acc->front().sequence_number) {
-              Status st = db->Get(leveldb::ReadOptions(), new_val.key, &temp);
-              if (st.ok() && !st.IsNotFound() && temp == new_val.value) {
-                new_val.Pop(acc);
-                new_val.Push(acc, new_val);
-                result_set->insert(new_val.key);
-                result_set->erase(result_set->find(acc->front().key));
-              }
-            }
-            // value->push_back(newVal);
-            // kNoOfOutputs--;
-            // outputFile<<key<<"\nfound"<<endl;
-            found = true;
-          }
-        }
-        break;
+        case kTypeDeletion:
+          *s = Status::NotFound(Slice());
+          return true;
       }
-      case kTypeDeletion:
-        break;
     }
-    iter.Next();
   }
-  return found;
+  return false;
+}
+
+void MemTable::Get(const Slice& skey, SequenceNumber snapshot,
+                   std::vector<SKeyReturnVal>* acc, Status* s,
+                   std::string secondary_key,
+                   std::unordered_set<std::string>* result_set,
+                   int top_k_output) {
+  auto lookup = secTable_.find(skey.ToString());
+  if (lookup == secTable_.end()) {
+    return;
+  }
+  std::pair<std::string, std::vector<std::string>*> pr = *lookup;
+  for (int i = pr.second->size() - 1; i >= 0; i--) {
+    if (acc->size() >= top_k_output) return;
+
+    Slice pkey = pr.second->at(i);
+    LookupKey lkey(pkey, snapshot);
+    std::string secKeyVal;
+    std::string svalue;
+    Status s;
+    uint64_t tag;
+    if (!this->Get(lkey, &svalue, &s, &tag)) return;
+    if (s.IsNotFound()) return;
+
+    Status st = ExtractKeyFromJSON(svalue, secAttribute, &secKeyVal);
+    if (!st.ok()) return;
+    if (comparator_.comparator.user_comparator()->Compare(secKeyVal, skey) ==
+        0) {
+      struct SKeyReturnVal newVal;
+      newVal.key = pr.second->at(i);
+      std::string temp;
+
+      if (result_set->find(newVal.key) == result_set->end()) {
+        newVal.value = svalue;
+        newVal.sequence_number = tag;
+
+        if (acc->size() < top_k_output) {
+          newVal.Push(acc, newVal);
+          result_set->insert(newVal.key);
+
+        } else if (newVal.sequence_number > acc->front().sequence_number) {
+          newVal.Pop(acc);
+          newVal.Push(acc, newVal);
+          result_set->insert(newVal.key);
+          result_set->erase(result_set->find(acc->front().key));
+        }
+      }
+    }
+  }
 }
 
 }  // namespace leveldb

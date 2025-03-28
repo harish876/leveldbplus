@@ -144,7 +144,9 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       db_lock_(nullptr),
       shutting_down_(false),
       background_work_finished_signal_(&mutex_),
-      mem_(nullptr),
+      mem_(
+          nullptr),  // init memtable constructor here -
+                     // https://github.com/mohiuddin-shuvo/LevelDB_Embedded-Secondary-Index/commit/ba1746a6a5b0e98b6d1c1d10df3cdb5c4bde0445#diff-6fdb755f590d9b01ecb89bd8ceb28577e85536d4472f8e4fc3addeb9a65f3645
       imm_(nullptr),
       has_imm_(false),
       logfile_(nullptr),
@@ -446,7 +448,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
     WriteBatchInternal::SetContents(&batch, record);
 
     if (mem == nullptr) {
-      mem = new MemTable(internal_comparator_);
+      mem = new MemTable(internal_comparator_, this->options_.secondary_key);
       mem->Ref();
     }
     status = WriteBatchInternal::InsertInto(&batch, mem);
@@ -492,7 +494,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
         mem = nullptr;
       } else {
         // mem can be nullptr if lognum exists but was empty.
-        mem_ = new MemTable(internal_comparator_);
+        mem_ = new MemTable(internal_comparator_, this->options_.secondary_key);
         mem_->Ref();
       }
     }
@@ -1204,13 +1206,13 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& s_key,
     LookupKey lkey(s_key, snapshot);
 
     std::unordered_set<std::string> result_set;
-    mem->Get(lkey, acc, &s, this->options_.secondary_key, &result_set,
-             top_k_outputs, this);
+    mem->Get(s_key, snapshot, acc, &s, this->options_.secondary_key,
+             &result_set, top_k_outputs);
 
     if (imm != nullptr && top_k_outputs - acc->size() > 0) {
       int mem_size = acc->size();
-      imm->Get(lkey, acc, &s, this->options_.secondary_key, &result_set,
-               top_k_outputs, this);
+      imm->Get(s_key, snapshot, acc, &s, this->options_.secondary_key,
+               &result_set, top_k_outputs);
     }
 
     if (top_k_outputs > (int)(acc->size())) {
@@ -1218,16 +1220,13 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& s_key,
                        top_k_outputs, &result_set, this);
       //  have_stat_update = true;
     }
-    // if (top_k_outputs < acc->size()) {
-    //   acc->erase(acc->begin() + top_k_outputs, acc->end());
-    // }
-    // std::sort_heap(acc->begin(), acc->end(), NewestFirst);
+    std::sort_heap(acc->begin(), acc->end(), NewestFirst);
     mutex_.Lock();
   }
 
-  if (have_stat_update && current->UpdateStats(stats)) {
-    MaybeScheduleCompaction();
-  }
+  // /*if (have_stat_update && current->UpdateStats(stats)) {
+  //   MaybeScheduleCompaction();
+  // }*/
   mem->Unref();
   if (imm != nullptr) imm->Unref();
   current->Unref();
@@ -1474,7 +1473,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       log_ = new log::Writer(lfile);
       imm_ = mem_;
       has_imm_.store(true, std::memory_order_release);
-      mem_ = new MemTable(internal_comparator_);
+      mem_ = new MemTable(internal_comparator_, this->options_.secondary_key);
       mem_->Ref();
       force = false;  // Do not force another compaction if have room
       MaybeScheduleCompaction();
@@ -1599,7 +1598,8 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
       impl->logfile_ = lfile;
       impl->logfile_number_ = new_log_number;
       impl->log_ = new log::Writer(lfile);
-      impl->mem_ = new MemTable(impl->internal_comparator_);
+      impl->mem_ =
+          new MemTable(impl->internal_comparator_, options.secondary_key);
       impl->mem_->Ref();
     }
   }
