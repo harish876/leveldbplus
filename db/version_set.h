@@ -15,12 +15,17 @@
 #ifndef STORAGE_LEVELDB_DB_VERSION_SET_H_
 #define STORAGE_LEVELDB_DB_VERSION_SET_H_
 
-#include <map>
-#include <set>
-#include <vector>
-
+#include "db/db_impl.h"
 #include "db/dbformat.h"
 #include "db/version_edit.h"
+#include <map>
+#include <set>
+#include <unordered_set>
+#include <vector>
+
+#include "leveldb/db.h"
+#include "leveldb/options.h"
+
 #include "port/port.h"
 #include "port/thread_annotations.h"
 
@@ -74,6 +79,11 @@ class Version {
   // REQUIRES: lock is not held
   Status Get(const ReadOptions&, const LookupKey& key, std::string* val,
              GetStats* stats);
+
+  Status Get(const ReadOptions&, const LookupKey& key,
+             std::vector<SKeyReturnVal>* value, GetStats* stats,
+             std::string secondary_key, int top_k_outputs,
+             std::unordered_set<std::string>* result_set, DBImpl* db);
 
   // Adds "stats" into the current state.  Returns true if a new
   // compaction may need to be triggered, false otherwise.

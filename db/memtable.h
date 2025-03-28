@@ -5,11 +5,14 @@
 #ifndef STORAGE_LEVELDB_DB_MEMTABLE_H_
 #define STORAGE_LEVELDB_DB_MEMTABLE_H_
 
-#include <string>
-
+#include "db/db_impl.h"
 #include "db/dbformat.h"
 #include "db/skiplist.h"
+#include <string>
+#include <unordered_set>
+
 #include "leveldb/db.h"
+
 #include "util/arena.h"
 
 namespace leveldb {
@@ -61,6 +64,11 @@ class MemTable {
   // in *status and return true.
   // Else, return false.
   bool Get(const LookupKey& key, std::string* value, Status* s);
+
+  bool Get(const LookupKey& s_key, std::vector<SKeyReturnVal>* value, Status* s,
+           std::string secondary_key,
+           std::unordered_set<std::string>* result_set, int top_k_value,
+           DBImpl* db);
 
  private:
   friend class MemTableIterator;

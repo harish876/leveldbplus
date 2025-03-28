@@ -5,6 +5,7 @@
 #ifndef STORAGE_LEVELDB_INCLUDE_TABLE_H_
 #define STORAGE_LEVELDB_INCLUDE_TABLE_H_
 
+#include "db/db_impl.h"
 #include <cstdint>
 
 #include "leveldb/export.h"
@@ -73,8 +74,15 @@ class LEVELDB_EXPORT Table {
                      void (*handle_result)(void* arg, const Slice& k,
                                            const Slice& v));
 
+  Status InternalGet(const ReadOptions& options, const Slice& k, void* arg,
+                     bool (*saver)(void*, const Slice&, const Slice&,
+                                   std::string sec_key, int top_k_output,
+                                   DBImpl* db),
+                     std::string sec_key, int top_k_output, DBImpl* db);
+
   void ReadMeta(const Footer& footer);
   void ReadFilter(const Slice& filter_handle_value);
+  void ReadSecondaryFilter(const Slice& filter_handle_value);
 
   Rep* const rep_;
 };

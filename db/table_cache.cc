@@ -4,9 +4,12 @@
 
 #include "db/table_cache.h"
 
+#include "db/db_impl.h"
 #include "db/filename.h"
+
 #include "leveldb/env.h"
 #include "leveldb/table.h"
+
 #include "util/coding.h"
 
 namespace leveldb {
@@ -106,6 +109,22 @@ Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
   if (s.ok()) {
     Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
     s = t->InternalGet(options, k, arg, handle_result);
+    cache_->Release(handle);
+  }
+  return s;
+}
+
+Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
+                       uint64_t file_size, const Slice& k, void* arg,
+                       bool (*saver)(void*, const Slice&, const Slice&,
+                                     std::string sec_key, int top_k_output,
+                                     DBImpl* db),
+                       std::string sec_key, int top_k_output, DBImpl* db) {
+  Cache::Handle* handle = NULL;
+  Status s = FindTable(file_number, file_size, &handle);
+  if (s.ok()) {
+    Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+    s = t->InternalGet(options, k, arg, saver, sec_key, top_k_output, db);
     cache_->Release(handle);
   }
   return s;

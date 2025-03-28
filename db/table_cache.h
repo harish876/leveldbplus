@@ -7,12 +7,14 @@
 #ifndef STORAGE_LEVELDB_DB_TABLE_CACHE_H_
 #define STORAGE_LEVELDB_DB_TABLE_CACHE_H_
 
+#include "db/db_impl.h"
+#include "db/dbformat.h"
 #include <cstdint>
 #include <string>
 
-#include "db/dbformat.h"
 #include "leveldb/cache.h"
 #include "leveldb/table.h"
+
 #include "port/port.h"
 
 namespace leveldb {
@@ -43,6 +45,12 @@ class TableCache {
   Status Get(const ReadOptions& options, uint64_t file_number,
              uint64_t file_size, const Slice& k, void* arg,
              void (*handle_result)(void*, const Slice&, const Slice&));
+
+  Status Get(const ReadOptions& options, uint64_t file_number,
+             uint64_t file_size, const Slice& k, void* arg,
+             bool (*saver)(void*, const Slice&, const Slice&,
+                           std::string sec_key, int top_k_output, DBImpl* db),
+             std::string sec_key, int top_k_output, DBImpl* db);
 
   // Evict any entry for the specified file number
   void Evict(uint64_t file_number);

@@ -4,11 +4,14 @@
 
 #include "leveldb/table.h"
 
+#include "db/db_impl.h"
+
 #include "leveldb/cache.h"
 #include "leveldb/comparator.h"
 #include "leveldb/env.h"
 #include "leveldb/filter_policy.h"
 #include "leveldb/options.h"
+
 #include "table/block.h"
 #include "table/filter_block.h"
 #include "table/format.h"
@@ -16,6 +19,13 @@
 #include "util/coding.h"
 
 namespace leveldb {
+
+static Slice GetLengthPrefixedSlice(const char* data) {
+  uint32_t len;
+  const char* p = data;
+  p = GetVarint32Ptr(p, p + 5, &len);  // +5: we assume "p" is not corrupted
+  return Slice(p, len);
+}
 
 struct Table::Rep {
   ~Rep() {
@@ -30,6 +40,9 @@ struct Table::Rep {
   uint64_t cache_id;
   FilterBlockReader* filter;
   const char* filter_data;
+
+  FilterBlockReader* secondary_filter;
+  const char* secondary_filter_data;
 
   BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
   Block* index_block;
@@ -72,6 +85,8 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
     rep->cache_id = (options.block_cache ? options.block_cache->NewId() : 0);
     rep->filter_data = nullptr;
     rep->filter = nullptr;
+    rep->secondary_filter_data = nullptr;
+    rep->secondary_filter = nullptr;
     *table = new Table(rep);
     (*table)->ReadMeta(footer);
   }
@@ -104,6 +119,12 @@ void Table::ReadMeta(const Footer& footer) {
   if (iter->Valid() && iter->key() == Slice(key)) {
     ReadFilter(iter->value());
   }
+  std::string skey = "secondaryfilter.";
+  skey.append(rep_->options.filter_policy->Name());
+  iter->Seek(skey);
+  if (iter->Valid() && iter->key() == Slice(skey)) {
+    ReadSecondaryFilter(iter->value());
+  }
   delete iter;
   delete meta;
 }
@@ -131,7 +152,67 @@ void Table::ReadFilter(const Slice& filter_handle_value) {
   rep_->filter = new FilterBlockReader(rep_->options.filter_policy, block.data);
 }
 
+void Table::ReadSecondaryFilter(const Slice& filter_handle_value) {
+  Slice v = filter_handle_value;
+  BlockHandle filter_handle;
+  if (!filter_handle.DecodeFrom(&v).ok()) {
+    return;
+  }
+
+  // We might want to unify with ReadBlock() if we start
+  // requiring checksum verification in Table::Open.
+  ReadOptions opt;
+  BlockContents block;
+  if (!ReadBlock(rep_->file, opt, filter_handle, &block).ok()) {
+    return;
+  }
+  if (block.heap_allocated) {
+    rep_->secondary_filter_data =
+        block.data.data();  // Will need to delete later
+  }
+  rep_->secondary_filter =
+      new FilterBlockReader(rep_->options.filter_policy, block.data);
+}
+
 Table::~Table() { delete rep_; }
+
+Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
+                          bool (*saver)(void*, const Slice&, const Slice&,
+                                        std::string sec_key, int top_k_output,
+                                        DBImpl* db),
+                          std::string sec_key, int top_k_output, DBImpl* db) {
+  Status s;
+  Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
+  iiter->SeekToFirst();
+
+  int p = 1;
+  while (iiter->Valid()) {
+    Slice handle_value = iiter->value();
+    FilterBlockReader* filter = rep_->secondary_filter;
+    BlockHandle handle;
+    if (filter != NULL && handle.DecodeFrom(&handle_value).ok() &&
+        !filter->KeyMayMatch(handle.offset(), k)) {
+    } else {
+      Iterator* block_iter = BlockReader(this, options, iiter->value());
+      block_iter->SeekToFirst();
+      while (block_iter->Valid()) {
+        bool f = (*saver)(arg, block_iter->key(), block_iter->value(), sec_key,
+                          top_k_output, db);
+        block_iter->Next();
+      }
+      s = block_iter->status();
+      delete block_iter;
+    }
+
+    iiter->Next();
+  }
+
+  if (s.ok()) {
+    s = iiter->status();
+  }
+  delete iiter;
+  return s;
+}
 
 static void DeleteBlock(void* arg, void* ignored) {
   delete reinterpret_cast<Block*>(arg);

@@ -3,11 +3,17 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include "db/memtable.h"
+
+#include "db/db_impl.h"
 #include "db/dbformat.h"
+#include <unordered_set>
+
 #include "leveldb/comparator.h"
 #include "leveldb/env.h"
 #include "leveldb/iterator.h"
+
 #include "util/coding.h"
+#include "util/json_utils.h"
 
 namespace leveldb {
 
@@ -133,6 +139,76 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
     }
   }
   return false;
+}
+
+bool MemTable::Get(const LookupKey& s_key, std::vector<SKeyReturnVal>* acc,
+                   Status* s, std::string secondary_key,
+                   std::unordered_set<std::string>* result_set,
+                   int top_k_output, DBImpl* db) {
+  if (secondary_key.empty()) {
+    return false;
+  }
+  Slice memkey = s_key.memtable_key();
+  Table::Iterator iter(&table_);
+  iter.SeekToFirst();
+  bool found;
+
+  // I believe we do a O(n) search for the actual key based on the secondary key
+
+  while (iter.Valid()) {
+    const char* entry = iter.key();
+    uint32_t key_length;
+    const char* key_ptr = GetVarint32Ptr(entry, entry + 5, &key_length);
+    const uint64_t tag = DecodeFixed64(key_ptr + key_length - 8);
+    std::string val;
+    switch (static_cast<ValueType>(tag & 0xff)) {
+      case kTypeValue: {
+        Slice v = GetLengthPrefixedSlice(key_ptr + key_length);
+        val.assign(v.data(), v.size());
+        std::string sec_key_attr;
+        Status s = ExtractKeyFromJSON(v, secondary_key, &sec_key_attr);
+        if (!s.ok()) {
+          break;
+        }
+        if (comparator_.comparator.user_comparator()->Compare(
+                sec_key_attr, s_key.user_key()) == 0) {
+          struct SKeyReturnVal new_val;
+          new_val.key = Slice(key_ptr, key_length - 8).ToString();
+          std::string temp;
+
+          if (result_set->find(new_val.key) == result_set->end()) {
+            new_val.value = val;
+            new_val.sequence_number = tag;  // not able to understand this
+
+            if (acc->size() < top_k_output) {
+              Status st = db->Get(leveldb::ReadOptions(), new_val.key, &temp);
+              if (st.ok() && !st.IsNotFound() && temp == new_val.value) {
+                new_val.Push(acc, new_val);
+                result_set->insert(new_val.key);
+              }
+            } else if (new_val.sequence_number > acc->front().sequence_number) {
+              Status st = db->Get(leveldb::ReadOptions(), new_val.key, &temp);
+              if (st.ok() && !st.IsNotFound() && temp == new_val.value) {
+                new_val.Pop(acc);
+                new_val.Push(acc, new_val);
+                result_set->insert(new_val.key);
+                result_set->erase(result_set->find(acc->front().key));
+              }
+            }
+            // value->push_back(newVal);
+            // kNoOfOutputs--;
+            // outputFile<<key<<"\nfound"<<endl;
+            found = true;
+          }
+        }
+        break;
+      }
+      case kTypeDeletion:
+        break;
+    }
+    iter.Next();
+  }
+  return found;
 }
 
 }  // namespace leveldb

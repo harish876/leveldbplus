@@ -7,3 +7,6 @@
 # Build directory.
 build/
 out/
+
+# test db
+test_level_db_idx

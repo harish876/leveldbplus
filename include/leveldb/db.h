@@ -5,12 +5,16 @@
 #ifndef STORAGE_LEVELDB_INCLUDE_DB_H_
 #define STORAGE_LEVELDB_INCLUDE_DB_H_
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <iostream>
+#include <vector>
 
 #include "leveldb/export.h"
 #include "leveldb/iterator.h"
 #include "leveldb/options.h"
+#include "leveldb/status.h"
 
 namespace leveldb {
 
@@ -40,6 +44,35 @@ struct LEVELDB_EXPORT Range {
   Slice limit;  // Not included in the range
 };
 
+struct LEVELDB_EXPORT SKeyReturnVal {
+  std::string key;           // Included in the range
+  std::string value;         // Not included in the range
+  uint64_t sequence_number;  // presumably sequence_number that leveldb assigns
+  // to each KV pair, we use this for top_k sorting
+
+  static bool comp(const leveldb::SKeyReturnVal& a,
+                   const leveldb::SKeyReturnVal& b) {
+    return a.sequence_number < b.sequence_number ? false : true;
+  }
+
+  void Push(std::vector<leveldb::SKeyReturnVal>* heap,
+            leveldb::SKeyReturnVal val) {
+    heap->push_back(val);
+    push_heap(heap->begin(), heap->end(), comp);
+  }
+
+  leveldb::SKeyReturnVal Pop(std::vector<leveldb::SKeyReturnVal>* heap) {
+    leveldb::SKeyReturnVal val = heap->front();
+
+    // This operation will move the smallest element to the end of the vector
+    pop_heap(heap->begin(), heap->end(), comp);
+
+    // Remove the last element from vector, which is the smallest element
+    heap->pop_back();
+    return val;
+  }
+};
+
 // A DB is a persistent ordered map from keys to values.
 // A DB is safe for concurrent access from multiple threads without
 // any external synchronization.
@@ -66,6 +99,13 @@ class LEVELDB_EXPORT DB {
   virtual Status Put(const WriteOptions& options, const Slice& key,
                      const Slice& value) = 0;
 
+  // Set the database entry for "key" to "value".  Returns OK on success,
+  // and a non-OK status on error.
+  // Note: Overloaded function to accept a document
+  virtual Status Put(const WriteOptions& options, const Slice& value) {
+    return Status::NotSupported("Put not implemented in ModelDB");
+  }
+
   // Remove the database entry (if any) for "key".  Returns OK on
   // success, and a non-OK status on error.  It is not an error if "key"
   // did not exist in the database.
@@ -86,6 +126,12 @@ class LEVELDB_EXPORT DB {
   // May return some other Status on an error.
   virtual Status Get(const ReadOptions& options, const Slice& key,
                      std::string* value) = 0;
+
+  // New Get method for query on secondary Key
+  virtual Status Get(const ReadOptions& options, const Slice& skey,
+                     std::vector<SKeyReturnVal>* value, int top_k_outputs) {
+    return Status::NotSupported("Get not implemented in ModelDB");
+  }
 
   // Return a heap-allocated iterator over the contents of the database.
   // The result of NewIterator() is initially invalid (caller must

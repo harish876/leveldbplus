@@ -5,16 +5,19 @@
 #include "leveldb/table_builder.h"
 
 #include <cassert>
+#include <sstream>
 
 #include "leveldb/comparator.h"
 #include "leveldb/env.h"
 #include "leveldb/filter_policy.h"
 #include "leveldb/options.h"
+
 #include "table/block_builder.h"
 #include "table/filter_block.h"
 #include "table/format.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
+#include "util/json_utils.h"
 
 namespace leveldb {
 
@@ -31,6 +34,9 @@ struct TableBuilder::Rep {
         filter_block(opt.filter_policy == nullptr
                          ? nullptr
                          : new FilterBlockBuilder(opt.filter_policy)),
+        secondary_filter_block(opt.filter_policy == nullptr
+                                   ? nullptr
+                                   : new FilterBlockBuilder(opt.filter_policy)),
         pending_index_entry(false) {
     index_block_options.block_restart_interval = 1;
   }
@@ -46,6 +52,7 @@ struct TableBuilder::Rep {
   int64_t num_entries;
   bool closed;  // Either Finish() or Abandon() has been called.
   FilterBlockBuilder* filter_block;
+  FilterBlockBuilder* secondary_filter_block;
 
   // We do not emit the index entry for a block until we have seen the
   // first key for the next data block.  This allows us to use shorter
@@ -66,6 +73,10 @@ TableBuilder::TableBuilder(const Options& options, WritableFile* file)
     : rep_(new Rep(options, file)) {
   if (rep_->filter_block != nullptr) {
     rep_->filter_block->StartBlock(0);
+  }
+
+  if (rep_->secondary_filter_block != nullptr) {
+    rep_->secondary_filter_block->StartBlock(0);
   }
 }
 
@@ -110,6 +121,19 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
 
   if (r->filter_block != nullptr) {
     r->filter_block->AddKey(key);
+  }
+
+  if (r->secondary_filter_block != nullptr) {
+    if (r->options.secondary_key.empty()) {
+      return;
+    }
+    std::string secondary_key_attr;
+    Status s = ExtractKeyFromJSON(value, r->options.secondary_key,
+                                  &secondary_key_attr);
+    if (!s.ok()) {
+      return;
+    }
+    r->secondary_filter_block->AddKey(secondary_key_attr);
   }
 
   r->last_key.assign(key.data(), key.size());

@@ -4,14 +4,6 @@
 
 #include "db/db_impl.h"
 
-#include <algorithm>
-#include <atomic>
-#include <cstdint>
-#include <cstdio>
-#include <set>
-#include <string>
-#include <vector>
-
 #include "db/builder.h"
 #include "db/db_iter.h"
 #include "db/dbformat.h"
@@ -22,18 +14,34 @@
 #include "db/table_cache.h"
 #include "db/version_set.h"
 #include "db/write_batch_internal.h"
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <ostream>
+#include <set>
+#include <sstream>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
 #include "leveldb/db.h"
 #include "leveldb/env.h"
+#include "leveldb/options.h"
 #include "leveldb/status.h"
 #include "leveldb/table.h"
 #include "leveldb/table_builder.h"
+
 #include "port/port.h"
 #include "table/block.h"
 #include "table/merger.h"
 #include "table/two_level_iterator.h"
 #include "util/coding.h"
+#include "util/json_utils.h"
 #include "util/logging.h"
 #include "util/mutexlock.h"
+
+#include "rapidjson/document.h"
 
 namespace leveldb {
 
@@ -1164,6 +1172,68 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
   return s;
 }
 
+static bool NewestFirst(const SKeyReturnVal& a, const SKeyReturnVal& b) {
+  return a.sequence_number < b.sequence_number ? false : true;
+}
+
+Status DBImpl::Get(const ReadOptions& options, const Slice& s_key,
+                   std::vector<SKeyReturnVal>* acc, int top_k_outputs) {
+  Status s;
+  MutexLock l(&mutex_);
+  SequenceNumber snapshot;
+  if (options.snapshot != nullptr) {
+    snapshot =
+        static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number();
+  } else {
+    snapshot = versions_->LastSequence();
+  }
+  MemTable* mem = mem_;
+  MemTable* imm = imm_;
+  Version* current = versions_->current();
+  mem->Ref();
+  if (imm != nullptr) imm->Ref();
+  current->Ref();
+
+  bool have_stat_update = false;
+  Version::GetStats stats;
+
+  //  Unlock while reading from files and memtables
+  {
+    mutex_.Unlock();
+    // First look in the memtable, then in the immutable memtable (if any).
+    LookupKey lkey(s_key, snapshot);
+
+    std::unordered_set<std::string> result_set;
+    mem->Get(lkey, acc, &s, this->options_.secondary_key, &result_set,
+             top_k_outputs, this);
+
+    if (imm != nullptr && top_k_outputs - acc->size() > 0) {
+      int mem_size = acc->size();
+      imm->Get(lkey, acc, &s, this->options_.secondary_key, &result_set,
+               top_k_outputs, this);
+    }
+
+    if (top_k_outputs > (int)(acc->size())) {
+      s = current->Get(options, lkey, acc, &stats, this->options_.secondary_key,
+                       top_k_outputs, &result_set, this);
+      //  have_stat_update = true;
+    }
+    // if (top_k_outputs < acc->size()) {
+    //   acc->erase(acc->begin() + top_k_outputs, acc->end());
+    // }
+    // std::sort_heap(acc->begin(), acc->end(), NewestFirst);
+    mutex_.Lock();
+  }
+
+  if (have_stat_update && current->UpdateStats(stats)) {
+    MaybeScheduleCompaction();
+  }
+  mem->Unref();
+  if (imm != nullptr) imm->Unref();
+  current->Unref();
+  return s;
+}
+
 Iterator* DBImpl::NewIterator(const ReadOptions& options) {
   SequenceNumber latest_snapshot;
   uint32_t seed;
@@ -1196,6 +1266,16 @@ void DBImpl::ReleaseSnapshot(const Snapshot* snapshot) {
 // Convenience methods
 Status DBImpl::Put(const WriteOptions& o, const Slice& key, const Slice& val) {
   return DB::Put(o, key, val);
+}
+
+Status DBImpl::Put(const WriteOptions& o, const Slice& val) {
+  std::string primary_key_attr;
+  Status s =
+      ExtractKeyFromJSON(val, this->options_.primary_key, &primary_key_attr);
+  if (!s.ok()) {
+    return s;
+  }
+  return DB::Put(o, primary_key_attr, val);
 }
 
 Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
