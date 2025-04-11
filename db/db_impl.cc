@@ -1210,7 +1210,6 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& s_key,
              &result_set, top_k_outputs);
 
     if (imm != nullptr && top_k_outputs - acc->size() > 0) {
-      int mem_size = acc->size();
       imm->Get(s_key, snapshot, acc, &s, this->options_.secondary_key,
                &result_set, top_k_outputs);
     }
@@ -1218,15 +1217,15 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& s_key,
     if (top_k_outputs > (int)(acc->size())) {
       s = current->Get(options, lkey, acc, &stats, this->options_.secondary_key,
                        top_k_outputs, &result_set, this);
-      //  have_stat_update = true;
+      have_stat_update = true;
     }
-    std::sort_heap(acc->begin(), acc->end(), NewestFirst);
+    // std::sort_heap(acc->begin(), acc->end(), NewestFirst);
     mutex_.Lock();
   }
 
-  // /*if (have_stat_update && current->UpdateStats(stats)) {
-  //   MaybeScheduleCompaction();
-  // }*/
+  if (have_stat_update && current->UpdateStats(stats)) {
+    MaybeScheduleCompaction();
+  }
   mem->Unref();
   if (imm != nullptr) imm->Unref();
   current->Unref();
