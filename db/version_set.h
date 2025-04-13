@@ -81,7 +81,7 @@ class Version {
              GetStats* stats);
 
   Status Get(const ReadOptions&, const LookupKey& key,
-             std::vector<SKeyReturnVal>* value, GetStats* stats,
+             std::vector<SecondaryKeyReturnVal>* value, GetStats* stats,
              std::string secondary_key, int top_k_outputs,
              std::unordered_set<std::string>* result_set, DBImpl* db);
 

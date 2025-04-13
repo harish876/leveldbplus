@@ -44,25 +44,26 @@ struct LEVELDB_EXPORT Range {
   Slice limit;  // Not included in the range
 };
 
-struct LEVELDB_EXPORT SKeyReturnVal {
+struct LEVELDB_EXPORT SecondaryKeyReturnVal {
   std::string key;           // Included in the range
   std::string value;         // Not included in the range
   uint64_t sequence_number;  // presumably sequence_number that leveldb assigns
   // to each KV pair, we use this for top_k sorting
 
-  static bool comp(const leveldb::SKeyReturnVal& a,
-                   const leveldb::SKeyReturnVal& b) {
+  static bool comp(const leveldb::SecondaryKeyReturnVal& a,
+                   const leveldb::SecondaryKeyReturnVal& b) {
     return a.sequence_number < b.sequence_number ? false : true;
   }
 
-  void Push(std::vector<leveldb::SKeyReturnVal>* heap,
-            leveldb::SKeyReturnVal val) {
+  void Push(std::vector<leveldb::SecondaryKeyReturnVal>* heap,
+            leveldb::SecondaryKeyReturnVal val) {
     heap->push_back(val);
     push_heap(heap->begin(), heap->end(), comp);
   }
 
-  leveldb::SKeyReturnVal Pop(std::vector<leveldb::SKeyReturnVal>* heap) {
-    leveldb::SKeyReturnVal val = heap->front();
+  leveldb::SecondaryKeyReturnVal Pop(
+      std::vector<leveldb::SecondaryKeyReturnVal>* heap) {
+    leveldb::SecondaryKeyReturnVal val = heap->front();
 
     // This operation will move the smallest element to the end of the vector
     pop_heap(heap->begin(), heap->end(), comp);
@@ -129,7 +130,8 @@ class LEVELDB_EXPORT DB {
 
   // New Get method for query on secondary Key
   virtual Status Get(const ReadOptions& options, const Slice& skey,
-                     std::vector<SKeyReturnVal>* value, int top_k_outputs) {
+                     std::vector<SecondaryKeyReturnVal>* value,
+                     int top_k_outputs) {
     return Status::NotSupported("Get not implemented in ModelDB");
   }
 

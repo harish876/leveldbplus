@@ -76,7 +76,7 @@ void queryWithIndex(leveldb::DB* db, int targetAge, int numRecords,
 
   auto startWithIndex = high_resolution_clock::now();
 
-  vector<leveldb::SKeyReturnVal> values;
+  vector<leveldb::SecondaryKeyReturnVal> values;
   leveldb::Status s = db->Get(
       roptions, leveldb::Slice(std::to_string(targetAge)), &values, numRecords);
 
@@ -146,7 +146,7 @@ void runComparison(leveldb::DB* db, int targetAge, int numRecords,
   std::cout << "PERFORMANCE COMPARISON\n";
   std::cout << "==========================================\n";
 
-  vector<leveldb::SKeyReturnVal> values;
+  vector<leveldb::SecondaryKeyReturnVal> values;
   auto startWithIndex = high_resolution_clock::now();
   db->Get(roptions, leveldb::Slice(std::to_string(targetAge)), &values,
           numRecords);
@@ -234,7 +234,7 @@ int main(int argc, char* argv[]) {
   // Setup database
   leveldb::DB* db;
   leveldb::Options options;
-  options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+  options.filter_policy = leveldb::NewBloomFilterPolicy(20);
   options.primary_key = "id";
   options.secondary_key = "age";
   options.create_if_missing = true;

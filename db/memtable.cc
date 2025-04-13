@@ -29,13 +29,13 @@ static Slice GetLengthPrefixedSlice(const char* data) {
 MemTable::MemTable(const InternalKeyComparator& comparator,
                    std::string secondary_key)
     : comparator_(comparator), refs_(0), table_(comparator_, &arena_) {
-  secAttribute = secondary_key;
+  secondary_attribute_ = secondary_key;
 }
 
 MemTable::~MemTable() {
   assert(refs_ == 0);
-  for (SecMemTable::iterator it = secTable_.begin(); it != secTable_.end();
-       it++) {
+  for (SecMemTable::iterator it = secondary_table_.begin();
+       it != secondary_table_.end(); it++) {
     std::pair<std::string, std::vector<std::string>*> pr = *it;
 
     std::vector<std::string>* invertedList = pr.second;
@@ -131,21 +131,20 @@ void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
   if (type == kTypeDeletion) {
     return;
   }
-  std::string secKey;
-  Status st =
-      ExtractKeyFromJSON(value.ToString().c_str(), secAttribute, &secKey);
+  std::string extracted_secondary_key;
+  Status st = ExtractKeyFromJSON(value.ToString().c_str(), secondary_attribute_,
+                                 &extracted_secondary_key);
   if (!st.ok()) {
     return;
   }
-  SecMemTable::const_iterator lookup = secTable_.find(secKey);
-  if (lookup == secTable_.end()) {
+  SecMemTable::const_iterator lookup =
+      secondary_table_.find(extracted_secondary_key);
+  if (lookup == secondary_table_.end()) {
     std::vector<std::string>* invertedList = new std::vector<std::string>();
     invertedList->push_back(key.ToString());
-
-    secTable_.insert(std::make_pair(secKey, invertedList));
-  }
-
-  else {
+    secondary_table_.insert(
+        std::make_pair(extracted_secondary_key, invertedList));
+  } else {
     std::pair<std::string, std::vector<std::string>*> pr = *lookup;
     pr.second->push_back(key.ToString());
   }
@@ -225,12 +224,11 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s,
 }
 
 void MemTable::Get(const Slice& skey, SequenceNumber snapshot,
-                   std::vector<SKeyReturnVal>* acc, Status* s,
-                   std::string secondary_key,
+                   std::vector<SecondaryKeyReturnVal>* acc, Status* s,
                    std::unordered_set<std::string>* result_set,
                    int top_k_output) {
-  auto lookup = secTable_.find(skey.ToString());
-  if (lookup == secTable_.end()) {
+  auto lookup = secondary_table_.find(skey.ToString());
+  if (lookup == secondary_table_.end()) {
     return;
   }
   std::pair<std::string, std::vector<std::string>*> pr = *lookup;
@@ -246,11 +244,11 @@ void MemTable::Get(const Slice& skey, SequenceNumber snapshot,
     if (!this->Get(lkey, &svalue, &s, &tag)) return;
     if (s.IsNotFound()) return;
 
-    Status st = ExtractKeyFromJSON(svalue, secAttribute, &secKeyVal);
+    Status st = ExtractKeyFromJSON(svalue, secondary_attribute_, &secKeyVal);
     if (!st.ok()) return;
     if (comparator_.comparator.user_comparator()->Compare(secKeyVal, skey) ==
         0) {
-      struct SKeyReturnVal newVal;
+      struct SecondaryKeyReturnVal newVal;
       newVal.key = pr.second->at(i);
       std::string temp;
 

@@ -72,8 +72,7 @@ class MemTable {
   // Get methods for Secondary Memtable
   bool Get(const LookupKey& key, std::string* value, Status* s, uint64_t* tag);
   void Get(const Slice& s_key, SequenceNumber snapshot,
-           std::vector<SKeyReturnVal>* value, Status* s,
-           std::string secondary_key,
+           std::vector<SecondaryKeyReturnVal>* value, Status* s,
            std::unordered_set<std::string>* result_set, int top_k_value);
 
  private:
@@ -97,8 +96,8 @@ class MemTable {
 
   // SECONDARY MEMTABLE
   typedef btree::btree_map<std::string, std::vector<std::string>*> SecMemTable;
-  SecMemTable secTable_;
-  std::string secAttribute;
+  SecMemTable secondary_table_;
+  std::string secondary_attribute_;
 };
 
 }  // namespace leveldb

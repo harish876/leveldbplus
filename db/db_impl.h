@@ -48,7 +48,8 @@ class DBImpl : public DB {
   Status Get(const ReadOptions& options, const Slice& key,
              std::string* value) override;
   Status Get(const ReadOptions& options, const Slice& s_key,
-             std::vector<SKeyReturnVal>* acc, int top_k_outputs) override;
+             std::vector<SecondaryKeyReturnVal>* acc,
+             int top_k_outputs) override;
   Iterator* NewIterator(const ReadOptions&) override;
   const Snapshot* GetSnapshot() override;
   void ReleaseSnapshot(const Snapshot* snapshot) override;
