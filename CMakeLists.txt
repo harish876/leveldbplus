@@ -36,6 +36,42 @@ endif(WIN32)
 option(LEVELDB_BUILD_TESTS "Build LevelDB's unit tests" ON)
 option(LEVELDB_BUILD_BENCHMARKS "Build LevelDB's benchmarks" ON)
 option(LEVELDB_INSTALL "Install LevelDB's header and library" ON)
+option(LEVELDB_HTTP "Build HTTP Server" ON)
+
+# Add this section for HTTP server with Crow
+if(LEVELDB_HTTP)
+  # Find required dependencies for Crow
+  find_package(Threads REQUIRED)
+
+  # Check for Boost - optional but recommended for Crow
+  find_package(Boost COMPONENTS system QUIET)
+
+  if(Boost_FOUND)
+    set(CROW_USE_BOOST ON)
+    message(STATUS "Boost found. Enabling Boost support for Crow.")
+  else()
+    set(CROW_USE_BOOST OFF)
+    message(STATUS "Boost not found. Building Crow without Boost support.")
+  endif()
+
+  # OpenSSL for HTTPS support (optional)
+  find_package(OpenSSL QUIET)
+
+  if(OpenSSL_FOUND)
+    set(CROW_ENABLE_SSL ON)
+    message(STATUS "OpenSSL found. Enabling HTTPS support.")
+  else()
+    set(CROW_ENABLE_SSL OFF)
+    message(STATUS "OpenSSL not found. HTTPS support disabled.")
+  endif()
+
+  # Set Crow options as needed
+  set(CROW_BUILD_EXAMPLES OFF CACHE BOOL "Build Crow examples" FORCE)
+  set(CROW_BUILD_TESTS OFF CACHE BOOL "Build Crow tests" FORCE)
+
+  # Add the http_server directory to the build
+  add_subdirectory(http_server)
+endif(LEVELDB_HTTP)
 
 include(CheckIncludeFile)
 check_include_file("unistd.h" HAVE_UNISTD_H)

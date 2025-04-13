@@ -1174,12 +1174,13 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
   return s;
 }
 
-static bool NewestFirst(const SKeyReturnVal& a, const SKeyReturnVal& b) {
+static bool NewestFirst(const SecondaryKeyReturnVal& a,
+                        const SecondaryKeyReturnVal& b) {
   return a.sequence_number < b.sequence_number ? false : true;
 }
 
 Status DBImpl::Get(const ReadOptions& options, const Slice& s_key,
-                   std::vector<SKeyReturnVal>* acc, int top_k_outputs) {
+                   std::vector<SecondaryKeyReturnVal>* acc, int top_k_outputs) {
   Status s;
   MutexLock l(&mutex_);
   SequenceNumber snapshot;
@@ -1206,27 +1207,24 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& s_key,
     LookupKey lkey(s_key, snapshot);
 
     std::unordered_set<std::string> result_set;
-    mem->Get(s_key, snapshot, acc, &s, this->options_.secondary_key,
-             &result_set, top_k_outputs);
+    mem->Get(s_key, snapshot, acc, &s, &result_set, top_k_outputs);
 
     if (imm != nullptr && top_k_outputs - acc->size() > 0) {
-      int mem_size = acc->size();
-      imm->Get(s_key, snapshot, acc, &s, this->options_.secondary_key,
-               &result_set, top_k_outputs);
+      imm->Get(s_key, snapshot, acc, &s, &result_set, top_k_outputs);
     }
 
     if (top_k_outputs > (int)(acc->size())) {
       s = current->Get(options, lkey, acc, &stats, this->options_.secondary_key,
                        top_k_outputs, &result_set, this);
-      //  have_stat_update = true;
+      have_stat_update = true;
     }
-    std::sort_heap(acc->begin(), acc->end(), NewestFirst);
+    // std::sort_heap(acc->begin(), acc->end(), NewestFirst);
     mutex_.Lock();
   }
 
-  // /*if (have_stat_update && current->UpdateStats(stats)) {
-  //   MaybeScheduleCompaction();
-  // }*/
+  if (have_stat_update && current->UpdateStats(stats)) {
+    MaybeScheduleCompaction();
+  }
   mem->Unref();
   if (imm != nullptr) imm->Unref();
   current->Unref();

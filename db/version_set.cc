@@ -266,7 +266,7 @@ struct SecSaver {
   SaverState state;
   const Comparator* ucmp;
   Slice user_key;
-  std::vector<SKeyReturnVal>* acc;
+  std::vector<SecondaryKeyReturnVal>* acc;
   std::unordered_set<std::string>* result_set;
 };
 }  // namespace
@@ -302,7 +302,7 @@ static bool SecSaveValue(void* arg, const Slice& ikey, const Slice& v,
     if (s->ucmp->Compare(key, s->user_key) == 0) {
       s->state = (parsed_key.type == kTypeValue) ? kFound : kDeleted;
       if (s->state == kFound) {
-        struct SKeyReturnVal new_val;
+        struct SecondaryKeyReturnVal new_val;
         Slice ukey = ExtractUserKey(ikey);
         if (s->result_set->find(ukey.ToString()) == s->result_set->end()) {
           new_val.key = ukey.ToString();
@@ -340,7 +340,8 @@ static bool NewestFirst(FileMetaData* a, FileMetaData* b) {
   return a->number > b->number;
 }
 
-static bool NewestFirstSequenceNumber(SKeyReturnVal a, SKeyReturnVal b) {
+static bool NewestFirstSequenceNumber(SecondaryKeyReturnVal a,
+                                      SecondaryKeyReturnVal b) {
   return a.sequence_number > b.sequence_number;
 }
 
@@ -466,7 +467,7 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
 }
 
 Status Version::Get(const ReadOptions& options, const LookupKey& k,
-                    std::vector<SKeyReturnVal>* acc, GetStats* stats,
+                    std::vector<SecondaryKeyReturnVal>* acc, GetStats* stats,
                     std::string secondary_key, int top_k_output,
                     std::unordered_set<std::string>* result_set, DBImpl* db) {
   Slice ikey = k.internal_key();

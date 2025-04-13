@@ -9,4 +9,4 @@ build/
 out/
 
 # test db
-test_level_db_idx
+test_level_db_*
