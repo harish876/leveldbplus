@@ -19,6 +19,7 @@
 #include "table/block.h"
 #include "table/block_builder.h"
 #include "table/format.h"
+#include "util/interval_tree.h"
 #include "util/random.h"
 #include "util/testutil.h"
 
@@ -218,7 +219,10 @@ class TableConstructor : public Constructor {
   Status FinishImpl(const Options& options, const KVMap& data) override {
     Reset();
     StringSink sink;
-    TableBuilder builder(options, &sink);
+    std::string minsec("");
+    std::string maxsec("");
+    TableBuilder builder(options, &sink, new Interval2DTreeWithTopK(), 0,
+                         &minsec, &maxsec);
 
     for (const auto& kvp : data) {
       builder.Add(kvp.first, kvp.second);

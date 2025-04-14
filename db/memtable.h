@@ -74,6 +74,11 @@ class MemTable {
   void Get(const Slice& s_key, SequenceNumber snapshot,
            std::vector<SecondaryKeyReturnVal>* value, Status* s,
            std::unordered_set<std::string>* result_set, int top_k_value);
+  void RangeGet(const Slice& startSkey, const Slice& endSkey,
+                SequenceNumber snapshot,
+                std::vector<SecondaryKeyReturnVal>* value, Status* s,
+                std::unordered_set<std::string>* resultSetofKeysFound,
+                int topKOutput);
 
  private:
   friend class MemTableIterator;

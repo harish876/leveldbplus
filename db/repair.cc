@@ -39,6 +39,8 @@
 #include "leveldb/db.h"
 #include "leveldb/env.h"
 
+#include "util/interval_tree.h"
+
 namespace leveldb {
 
 namespace {
@@ -303,7 +305,10 @@ class Repairer {
     if (!s.ok()) {
       return;
     }
-    TableBuilder* builder = new TableBuilder(options_, file);
+    TableBuilder* builder = new TableBuilder(
+        options_, file, new Interval2DTreeWithTopK(), t.meta.number,
+        &t.meta.smallest_sec, &t.meta.largest_sec);
+    // not sure about file_number
 
     // Copy data.
     Iterator* iter = NewTableIterator(t.meta);
@@ -370,7 +375,7 @@ class Repairer {
       // TODO(opt): separate out into multiple levels
       const TableInfo& t = tables_[i];
       edit_.AddFile(0, t.meta.number, t.meta.file_size, t.meta.smallest,
-                    t.meta.largest);
+                    t.meta.largest, t.meta.smallest_sec, t.meta.largest_sec);
     }
 
     // std::fprintf(stderr,

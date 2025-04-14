@@ -11,6 +11,7 @@
 #include "leveldb/table.h"
 
 #include "util/coding.h"
+#include "util/interval_tree.h"
 
 namespace leveldb {
 
@@ -37,7 +38,10 @@ TableCache::TableCache(const std::string& dbname, const Options& options,
     : env_(options.env),
       dbname_(dbname),
       options_(options),
-      cache_(NewLRUCache(entries)) {}
+      cache_(NewLRUCache(entries)) {
+  interval_tree_ = new Interval2DTreeWithTopK(
+      dbname + "/" + options.interval_tree_file_name, true);
+}
 
 TableCache::~TableCache() { delete cache_; }
 
@@ -117,14 +121,83 @@ Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
 Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
                        uint64_t file_size, const Slice& k, void* arg,
                        bool (*saver)(void*, const Slice&, const Slice&,
-                                     std::string sec_key, int top_k_output,
+                                     std::string secKey, int topKOutput,
                                      DBImpl* db),
-                       std::string sec_key, int top_k_output, DBImpl* db) {
+                       std::string secKey, int topKOutput, DBImpl* db) {
   Cache::Handle* handle = NULL;
   Status s = FindTable(file_number, file_size, &handle);
   if (s.ok()) {
     Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
-    s = t->InternalGet(options, k, arg, saver, sec_key, top_k_output, db);
+    if (this->options_.interval_tree_file_name.empty())
+      s = t->InternalGetWithInterval(options, k, arg, saver, secKey, topKOutput,
+                                     db);
+    else
+      s = t->InternalGet(options, k, arg, saver, secKey, topKOutput, db);
+
+    cache_->Release(handle);
+  } else {
+    std::cout << "file not found!" << std::endl;
+  }
+  return s;
+}
+
+Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
+                       uint64_t file_size, const Slice& blockKey,
+                       const Slice& k, void* arg,
+                       bool (*saver)(void*, const Slice&, const Slice&,
+                                     std::string secKey, int topKOutput,
+                                     DBImpl* db),
+                       std::string secKey, int topKOutput, DBImpl* db) {
+  Cache::Handle* handle = NULL;
+  Status s = FindTable(file_number, file_size, &handle);
+  if (s.ok()) {
+    Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+
+    s = t->InternalGet(options, blockKey, k, arg, saver, secKey, topKOutput,
+                       db);
+    cache_->Release(handle);
+  } else {
+    std::cout << "file not found!" << std::endl;
+  }
+  return s;
+}
+
+Status TableCache::RangeGet(const ReadOptions& options, uint64_t file_number,
+                            uint64_t file_size, const Slice& startk,
+                            const Slice& endk, void* arg,
+                            bool (*saver)(void*, const Slice&, const Slice&,
+                                          std::string secondary_key,
+                                          int top_k_output, DBImpl* db),
+                            std::string secondary_key, int top_k_output,
+                            DBImpl* db) {
+  Cache::Handle* handle = NULL;
+  Status s = FindTable(file_number, file_size, &handle);
+  if (s.ok()) {
+    Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+    // if(this->options_->IntervalTreeFileName.empty()) //?
+    s = t->RangeInternalGetWithInterval(options, startk, endk, arg, saver,
+                                        secondary_key, top_k_output, db);
+    cache_->Release(handle);
+  } else {
+    std::cout << "file not found!" << std::endl;
+  }
+  return s;
+}
+
+Status TableCache::RangeGet(const ReadOptions& options, uint64_t file_number,
+                            uint64_t file_size, const Slice& blockkey,
+                            void* arg,
+                            bool (*saver)(void*, const Slice&, const Slice&,
+                                          std::string secondary_key,
+                                          int top_k_output, DBImpl* db),
+                            std::string secondary_key, int top_k_output,
+                            DBImpl* db) {
+  Cache::Handle* handle = NULL;
+  Status s = FindTable(file_number, file_size, &handle);
+  if (s.ok()) {
+    Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+    s = t->RangeInternalGet(options, blockkey, arg, saver, secondary_key,
+                            top_k_output, db);
     cache_->Release(handle);
   }
   return s;

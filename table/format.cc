@@ -6,6 +6,7 @@
 
 #include "leveldb/env.h"
 #include "leveldb/options.h"
+
 #include "port/port.h"
 #include "table/block.h"
 #include "util/coding.h"
@@ -29,23 +30,40 @@ Status BlockHandle::DecodeFrom(Slice* input) {
   }
 }
 
-void Footer::EncodeTo(std::string* dst) const {
+void Footer::EncodeTo(std::string* dst, bool interval) const {
   const size_t original_size = dst->size();
   metaindex_handle_.EncodeTo(dst);
   index_handle_.EncodeTo(dst);
-  dst->resize(2 * BlockHandle::kMaxEncodedLength);  // Padding
+  if (interval) {
+    interval_handle_.EncodeTo(dst);
+    dst->resize(3 * BlockHandle::kMaxEncodedLength);  // Padding
+
+  } else {
+    dst->resize(2 * BlockHandle::kMaxEncodedLength);  // Padding
+  }
   PutFixed32(dst, static_cast<uint32_t>(kTableMagicNumber & 0xffffffffu));
   PutFixed32(dst, static_cast<uint32_t>(kTableMagicNumber >> 32));
-  assert(dst->size() == original_size + kEncodedLength);
+  if (!interval) {
+    assert(dst->size() == original_size + kEncodedLength);
+  } else {
+    assert(dst->size() ==
+           original_size + kEncodedLength + BlockHandle::kMaxEncodedLength);
+  }
   (void)original_size;  // Disable unused variable warning.
 }
 
-Status Footer::DecodeFrom(Slice* input) {
+Status Footer::DecodeFrom(Slice* input, bool interval) {
   if (input->size() < kEncodedLength) {
     return Status::Corruption("not an sstable (footer too short)");
   }
 
-  const char* magic_ptr = input->data() + kEncodedLength - 8;
+  const char* magic_ptr;
+  if (!interval) {
+    magic_ptr = input->data() + kEncodedLength - 8;
+  } else {
+    magic_ptr =
+        input->data() + kEncodedLength + BlockHandle::kMaxEncodedLength - 8;
+  }
   const uint32_t magic_lo = DecodeFixed32(magic_ptr);
   const uint32_t magic_hi = DecodeFixed32(magic_ptr + 4);
   const uint64_t magic = ((static_cast<uint64_t>(magic_hi) << 32) |
@@ -57,6 +75,11 @@ Status Footer::DecodeFrom(Slice* input) {
   Status result = metaindex_handle_.DecodeFrom(input);
   if (result.ok()) {
     result = index_handle_.DecodeFrom(input);
+  }
+  if (interval) {
+    if (result.ok()) {
+      result = interval_handle_.DecodeFrom(input);
+    }
   }
   if (result.ok()) {
     // We skip over any leftover data (just padding for now) in "input"

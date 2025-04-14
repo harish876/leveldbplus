@@ -65,6 +65,9 @@ struct DBImpl::CompactionState {
     uint64_t number;
     uint64_t file_size;
     InternalKey smallest, largest;
+
+    std::string smallest_sec;  // Smallest sec key served by table
+    std::string largest_sec;   // Largest sec key served by table
   };
 
   Output* current_output() { return &outputs[outputs.size() - 1]; }
@@ -546,7 +549,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
       level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
     }
     edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
-                  meta.largest);
+                  meta.largest, meta.smallest_sec, meta.largest_sec);
   }
 
   CompactionStats stats;
@@ -750,7 +753,7 @@ void DBImpl::BackgroundCompaction() {
     FileMetaData* f = c->input(0, 0);
     c->edit()->RemoveFile(c->level(), f->number);
     c->edit()->AddFile(c->level() + 1, f->number, f->file_size, f->smallest,
-                       f->largest);
+                       f->largest, f->smallest_sec, f->largest_sec);
     status = versions_->LogAndApply(c->edit(), &mutex_);
     if (!status.ok()) {
       RecordBackgroundError(status);
@@ -824,6 +827,8 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
     out.number = file_number;
     out.smallest.Clear();
     out.largest.Clear();
+    out.smallest_sec.clear();
+    out.largest_sec.clear();
     compact->outputs.push_back(out);
     mutex_.Unlock();
   }
@@ -832,7 +837,10 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
   std::string fname = TableFileName(dbname_, file_number);
   Status s = env_->NewWritableFile(fname, &compact->outfile);
   if (s.ok()) {
-    compact->builder = new TableBuilder(options_, compact->outfile);
+    compact->builder = new TableBuilder(
+        options_, compact->outfile, table_cache_->GetIntervalTree(),
+        file_number, &compact->current_output()->smallest_sec,
+        &compact->current_output()->largest_sec);
   }
   return s;
 }
@@ -899,7 +907,8 @@ Status DBImpl::InstallCompactionResults(CompactionState* compact) {
   for (size_t i = 0; i < compact->outputs.size(); i++) {
     const CompactionState::Output& out = compact->outputs[i];
     compact->compaction->edit()->AddFile(level + 1, out.number, out.file_size,
-                                         out.smallest, out.largest);
+                                         out.smallest, out.largest,
+                                         out.smallest_sec, out.largest_sec);
   }
   return versions_->LogAndApply(compact->compaction->edit(), &mutex_);
 }
@@ -1127,6 +1136,57 @@ int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
   return versions_->MaxNextLevelOverlappingBytes();
 }
 
+bool DBImpl::CheckIfValid(const ReadOptions& options, const Slice& key,
+                          int& level) {
+  Status s;
+  bool valid = true;
+  MutexLock l(&mutex_);
+  SequenceNumber snapshot;
+  if (options.snapshot != NULL) {
+    snapshot = reinterpret_cast<const SnapshotImpl*>(options.snapshot)
+                   ->sequence_number();
+  } else {
+    snapshot = versions_->LastSequence();
+  }
+
+  MemTable* mem = mem_;
+  MemTable* imm = imm_;
+  Version* current = versions_->current();
+  mem->Ref();
+  if (imm != NULL) imm->Ref();
+  current->Ref();
+  std::string value;
+  bool have_stat_update = false;
+  Version::GetStats stats;
+
+  // Unlock while reading from files and memtables
+  {
+    mutex_.Unlock();
+    // First look in the memtable, then in the immutable memtable (if any).
+    LookupKey lkey(key, snapshot);
+    if (mem->Get(lkey, &value, &s)) {
+      // Done
+      valid = false;
+    } else if (imm != NULL && imm->Get(lkey, &value, &s)) {
+      // Done
+      valid = false;
+    } else {
+      valid = current->CheckIfValid(options, lkey, level, &stats);
+      have_stat_update = true;
+    }
+    mutex_.Lock();
+  }
+
+  if (have_stat_update && current->UpdateStats(stats)) {
+    MaybeScheduleCompaction();
+  }
+  mem->Unref();
+  if (imm != NULL) imm->Unref();
+  current->Unref();
+
+  return valid;
+}
+
 Status DBImpl::Get(const ReadOptions& options, const Slice& key,
                    std::string* value) {
   Status s;
@@ -1217,6 +1277,71 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& s_key,
       s = current->Get(options, lkey, acc, &stats, this->options_.secondary_key,
                        top_k_outputs, &result_set, this);
       have_stat_update = true;
+    }
+    // std::sort_heap(acc->begin(), acc->end(), NewestFirst);
+    mutex_.Lock();
+  }
+
+  if (have_stat_update && current->UpdateStats(stats)) {
+    MaybeScheduleCompaction();
+  }
+  mem->Unref();
+  if (imm != nullptr) imm->Unref();
+  current->Unref();
+  return s;
+}
+
+Status DBImpl::RangeGet(const ReadOptions& options, const Slice& start_key,
+                        const Slice& end_key,
+                        std::vector<SecondaryKeyReturnVal>* acc,
+                        int top_k_outputs) {
+  Status s;
+  MutexLock l(&mutex_);
+  SequenceNumber snapshot;
+  if (options.snapshot != nullptr) {
+    snapshot =
+        static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number();
+  } else {
+    snapshot = versions_->LastSequence();
+  }
+  MemTable* mem = mem_;
+  MemTable* imm = imm_;
+  Version* current = versions_->current();
+  mem->Ref();
+  if (imm != nullptr) imm->Ref();
+  current->Ref();
+
+  bool have_stat_update = false;
+  Version::GetStats stats;
+
+  //  Unlock while reading from files and memtables
+  {
+    mutex_.Unlock();
+    // First look in the memtable, then in the immutable memtable (if any).
+    LookupKey start_lkey(start_key, snapshot);
+    LookupKey end_lkey(end_key, snapshot);
+
+    std::unordered_set<std::string> result_set;
+    mem->RangeGet(start_key, end_key, snapshot, acc, &s, &result_set,
+                  top_k_outputs);
+
+    if (imm != nullptr && top_k_outputs - acc->size() > 0) {
+      imm->RangeGet(start_key, end_key, snapshot, acc, &s, &result_set,
+                    top_k_outputs);
+    }
+
+    if (top_k_outputs > (int)(acc->size())) {
+      if (this->options_.interval_tree_file_name.empty()) {
+        s = current->EmbeddedRangeGet(
+            options, start_key.ToString(), end_key.ToString(), acc, &stats,
+            this->options_.secondary_key, top_k_outputs, &result_set, this,
+            snapshot);
+      } else {
+        s = current->RangeGet(options, start_key.ToString(), end_key.ToString(),
+                              acc, &stats, this->options_.secondary_key,
+                              top_k_outputs, &result_set, this, snapshot);
+      }
+      // have_stat_update = true; //?
     }
     // std::sort_heap(acc->begin(), acc->end(), NewestFirst);
     mutex_.Lock();

@@ -5,11 +5,10 @@
 #ifndef STORAGE_LEVELDB_DB_VERSION_EDIT_H_
 #define STORAGE_LEVELDB_DB_VERSION_EDIT_H_
 
+#include "db/dbformat.h"
 #include <set>
 #include <utility>
 #include <vector>
-
-#include "db/dbformat.h"
 
 namespace leveldb {
 
@@ -24,6 +23,9 @@ struct FileMetaData {
   uint64_t file_size;    // File size in bytes
   InternalKey smallest;  // Smallest internal key served by table
   InternalKey largest;   // Largest internal key served by table
+
+  std::string smallest_sec;  // Smallest sec key served by table
+  std::string largest_sec;   // Largest sec key served by table
 };
 
 class VersionEdit {
@@ -61,12 +63,15 @@ class VersionEdit {
   // REQUIRES: This version has not been saved (see VersionSet::SaveTo)
   // REQUIRES: "smallest" and "largest" are smallest and largest keys in file
   void AddFile(int level, uint64_t file, uint64_t file_size,
-               const InternalKey& smallest, const InternalKey& largest) {
+               const InternalKey& smallest, const InternalKey& largest,
+               const std::string& smallestsec, const std::string& largestsec) {
     FileMetaData f;
     f.number = file;
     f.file_size = file_size;
     f.smallest = smallest;
     f.largest = largest;
+    f.smallest_sec = smallestsec;
+    f.largest_sec = largestsec;
     new_files_.push_back(std::make_pair(level, f));
   }
 

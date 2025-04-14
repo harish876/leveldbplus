@@ -33,15 +33,13 @@ MemTable::MemTable(const InternalKeyComparator& comparator,
 }
 
 MemTable::~MemTable() {
-  assert(refs_ == 0);
-  for (SecMemTable::iterator it = secondary_table_.begin();
-       it != secondary_table_.end(); it++) {
-    std::pair<std::string, std::vector<std::string>*> pr = *it;
-
-    std::vector<std::string>* invertedList = pr.second;
-    invertedList->clear();
-    delete invertedList;
+  SecMemTable::const_iterator lookup = secondary_table_.begin();
+  for (; lookup != secondary_table_.end(); lookup.increment()) {
+    std::pair<std::string, std::vector<std::string>*> pr = *lookup;
+    delete pr.second;
   }
+  secondary_table_.clear();
+  assert(refs_ == 0);
 }
 
 size_t MemTable::ApproximateMemoryUsage() { return arena_.MemoryUsage(); }
@@ -265,6 +263,57 @@ void MemTable::Get(const Slice& skey, SequenceNumber snapshot,
           newVal.Push(acc, newVal);
           result_set->insert(newVal.key);
           result_set->erase(result_set->find(acc->front().key));
+        }
+      }
+    }
+  }
+}
+
+void MemTable::RangeGet(const Slice& start_skey, const Slice& end_skey,
+                        SequenceNumber snapshot,
+                        std::vector<SecondaryKeyReturnVal>* acc, Status* s,
+                        std::unordered_set<std::string>* result_set,
+                        int top_k_output) {
+  auto lookuplb = secondary_table_.lower_bound(start_skey.ToString());
+  auto lookupub = secondary_table_.upper_bound(end_skey.ToString());
+
+  for (; lookuplb != lookupub; lookuplb++) {
+    std::pair<std::string, std::vector<std::string>*> pr = *lookuplb;
+    for (int i = pr.second->size() - 1; i >= 0; i--) {
+      if (acc->size() >= top_k_output) {
+        continue;
+      }
+      Slice pkey = pr.second->at(i);
+      LookupKey lkey(pkey, snapshot);
+      std::string secKeyVal;
+      std::string svalue;
+      Status s;
+      uint64_t tag;
+      if (!this->Get(lkey, &svalue, &s, &tag)) return;
+      if (s.IsNotFound()) return;
+
+      Status st = ExtractKeyFromJSON(svalue, secondary_attribute_, &secKeyVal);
+      if (!st.ok()) return;
+      if (comparator_.comparator.user_comparator()->Compare(secKeyVal,
+                                                            pr.first) == 0) {
+        struct SecondaryKeyReturnVal newVal;
+        newVal.key = pr.second->at(i);
+        std::string temp;
+
+        if (result_set->find(newVal.key) == result_set->end()) {
+          newVal.value = svalue;
+          newVal.sequence_number = tag;
+
+          if (acc->size() < top_k_output) {
+            newVal.Push(acc, newVal);
+            result_set->insert(newVal.key);
+
+          } else if (newVal.sequence_number > acc->front().sequence_number) {
+            newVal.Pop(acc);
+            newVal.Push(acc, newVal);
+            result_set->insert(newVal.key);
+            result_set->erase(result_set->find(acc->front().key));
+          }
         }
       }
     }

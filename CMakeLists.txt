@@ -232,6 +232,8 @@ target_sources(leveldb
   "util/status.cc"
   "util/json_utils.h"
   "util/json_utils.cc"
+  "util/interval_tree.h"
+  "util/interval_tree.cc"
 
   # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
   $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>

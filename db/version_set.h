@@ -85,6 +85,24 @@ class Version {
              std::string secondary_key, int top_k_outputs,
              std::unordered_set<std::string>* result_set, DBImpl* db);
 
+  Status RangeGet(const ReadOptions&, std::string start_key,
+                  std::string end_key,
+                  std::vector<SecondaryKeyReturnVal>* value, GetStats* stats,
+                  std::string secondary_key, int top_k_outputs,
+                  std::unordered_set<std::string>* result_set, DBImpl* db,
+                  SequenceNumber snapshot);
+
+  Status EmbeddedRangeGet(const ReadOptions&, std::string start_key,
+                          std::string end_key,
+                          std::vector<SecondaryKeyReturnVal>* value,
+                          GetStats* stats, std::string secondary_key,
+                          int top_k_outputs,
+                          std::unordered_set<std::string>* result_set,
+                          DBImpl* db, SequenceNumber snapshot);
+
+  bool CheckIfValid(const ReadOptions& options, const LookupKey& key,
+                    int& level, GetStats* stats);
+
   // Adds "stats" into the current state.  Returns true if a new
   // compaction may need to be triggered, false otherwise.
   // REQUIRES: lock is held

@@ -135,6 +135,14 @@ class LEVELDB_EXPORT DB {
     return Status::NotSupported("Get not implemented in ModelDB");
   }
 
+  // New RangeGet method
+  virtual Status RangeGet(const ReadOptions& options, const Slice& start_skey,
+                          const Slice& end_skey,
+                          std::vector<SecondaryKeyReturnVal>* value,
+                          int kNoOfOutputs) {
+    return Status::NotSupported("RangeGet not implemented in ModelDB");
+  }
+
   // Return a heap-allocated iterator over the contents of the database.
   // The result of NewIterator() is initially invalid (caller must
   // call one of the Seek methods on the iterator before using it).

@@ -5,6 +5,7 @@
 #include "db/version_set.h"
 
 #include "db/db_impl.h"
+#include "db/dbformat.h"
 #include "db/filename.h"
 #include "db/log_reader.h"
 #include "db/log_writer.h"
@@ -12,16 +13,25 @@
 #include "db/table_cache.h"
 #include <algorithm>
 #include <cstdio>
+#include <list>
+#include <sstream>
 
+#include "leveldb/db.h"
 #include "leveldb/env.h"
+#include "leveldb/options.h"
 #include "leveldb/status.h"
 #include "leveldb/table_builder.h"
 
 #include "table/merger.h"
 #include "table/two_level_iterator.h"
 #include "util/coding.h"
+#include "util/interval_tree.h"
 #include "util/json_utils.h"
 #include "util/logging.h"
+
+#define SSTR(x)                                                             \
+  static_cast<std::ostringstream&>((std::ostringstream() << std::dec << x)) \
+      .str()
 
 namespace leveldb {
 
@@ -266,9 +276,20 @@ struct SecSaver {
   SaverState state;
   const Comparator* ucmp;
   Slice user_key;
+  int level;
   std::vector<SecondaryKeyReturnVal>* acc;
   std::unordered_set<std::string>* result_set;
 };
+struct RangeSecSaver {
+  SaverState state;
+  const Comparator* ucmp;
+  Slice start_user_key;
+  Slice end_user_key;
+  int level;
+  std::vector<SecondaryKeyReturnVal>* acc;
+  std::unordered_set<std::string>* result_set;
+};
+
 }  // namespace
 static void SaveValue(void* arg, const Slice& ikey, const Slice& v) {
   Saver* s = reinterpret_cast<Saver*>(arg);
@@ -285,7 +306,7 @@ static void SaveValue(void* arg, const Slice& ikey, const Slice& v) {
   }
 }
 static bool SecSaveValue(void* arg, const Slice& ikey, const Slice& v,
-                         std::string sec_key, int topKOutput, DBImpl* db) {
+                         std::string sec_key, int top_k_output, DBImpl* db) {
   SecSaver* s = reinterpret_cast<SecSaver*>(arg);
   ParsedInternalKey parsed_key;
 
@@ -311,23 +332,76 @@ static bool SecSaveValue(void* arg, const Slice& ikey, const Slice& v,
 
           std::string temp;
 
-          if (s->acc->size() < topKOutput) {
-            Status st = db->Get(leveldb::ReadOptions(), new_val.key, &temp);
-            if (st.ok() && !st.IsNotFound() && temp == new_val.value) {
+          if (s->acc->size() < top_k_output) {
+            if (db->CheckIfValid(leveldb::ReadOptions(), new_val.key,
+                                 s->level)) {
               new_val.Push(s->acc, new_val);
               s->result_set->insert(ukey.ToString());
             }
           } else if (new_val.sequence_number >
                      s->acc->front().sequence_number) {
-            Status st = db->Get(leveldb::ReadOptions(), new_val.key, &temp);
-            if (st.ok() && !st.IsNotFound() && temp == new_val.value) {
+            if (db->CheckIfValid(leveldb::ReadOptions(), new_val.key,
+                                 s->level)) {
               new_val.Pop(s->acc);
               new_val.Push(s->acc, new_val);
               s->result_set->insert(ukey.ToString());
-              s->result_set->erase(s->result_set->find(s->acc->front().key));
+              // s->result_set->erase(s->result_set->find(s->acc->front().key));
             }
           }
 
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+static bool RangeSecSaveValue(void* arg, const Slice& ikey, const Slice& v,
+                              std::string sec_key, int top_k_output,
+                              DBImpl* db) {
+  RangeSecSaver* s = reinterpret_cast<RangeSecSaver*>(arg);
+  ParsedInternalKey parsed_key;
+
+  if (!ParseInternalKey(ikey, &parsed_key)) {
+    s->state = kCorrupt;
+  } else {
+    std::string val;
+    val.assign(v.data(), v.size());
+    std::string key;
+    Status st = ExtractKeyFromJSON(val, sec_key, &key);
+    if (!st.ok()) {
+      return false;
+    }
+    if (s->ucmp->Compare(key, s->start_user_key) >= 0 &&
+        s->ucmp->Compare(key, s->end_user_key) <= 0) {
+      s->state = (parsed_key.type == kTypeValue) ? kFound : kDeleted;
+      if (s->state == kFound) {
+        struct SecondaryKeyReturnVal new_val;
+        Slice ukey = ExtractUserKey(ikey);
+        if (s->result_set->find(ukey.ToString()) == s->result_set->end()) {
+          new_val.key = ukey.ToString();
+          new_val.value = val;
+          new_val.sequence_number = parsed_key.sequence;
+
+          std::string temp;
+
+          if (s->acc->size() < top_k_output) {
+            if (db->CheckIfValid(leveldb::ReadOptions(), new_val.key,
+                                 s->level)) {
+              new_val.Push(s->acc, new_val);
+              // s->result_set->insert(ukey.ToString()); //?
+            }
+          } else if (new_val.sequence_number >
+                     s->acc->front().sequence_number) {
+            if (db->CheckIfValid(leveldb::ReadOptions(), new_val.key,
+                                 s->level)) {
+              new_val.Pop(s->acc);
+              new_val.Push(s->acc, new_val);
+              // s->result_set->insert(ukey.ToString()); //?
+              // s->result_set->erase(s->result_set->find(s->acc->front().key));
+              // //?
+            }
+          }
           return true;
         }
       }
@@ -386,6 +460,105 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
       }
     }
   }
+}
+
+bool Version::CheckIfValid(const ReadOptions& options, const LookupKey& k,
+                           int& maxlevel, GetStats* stats) {
+  Slice ikey = k.internal_key();
+  Slice user_key = k.user_key();
+  const Comparator* ucmp = vset_->icmp_.user_comparator();
+  Status s;
+
+  stats->seek_file = NULL;
+  stats->seek_file_level = -1;
+  FileMetaData* last_file_read = NULL;
+  int last_file_read_level = -1;
+
+  // We can search level-by-level since entries never hop across
+  // levels.  Therefore we are guaranteed that if we find data
+  // in an smaller level, later levels are irrelevant.
+  std::vector<FileMetaData*> tmp;
+  FileMetaData* tmp2;
+  for (int level = 0; level < config::kNumLevels; level++) {
+    if (level == maxlevel) return true;
+    size_t num_files = files_[level].size();
+    if (num_files == 0) continue;
+
+    // Get the list of files to search in this level
+    FileMetaData* const* files = &files_[level][0];
+    if (level == 0) {
+      // Level-0 files may overlap each other.  Find all files that
+      // overlap user_key and process them in order from newest to oldest.
+      tmp.reserve(num_files);
+      for (uint32_t i = 0; i < num_files; i++) {
+        FileMetaData* f = files[i];
+        if (ucmp->Compare(user_key, f->smallest.user_key()) >= 0 &&
+            ucmp->Compare(user_key, f->largest.user_key()) <= 0) {
+          tmp.push_back(f);
+        }
+      }
+      if (tmp.empty()) continue;
+
+      std::sort(tmp.begin(), tmp.end(), NewestFirst);
+      files = &tmp[0];
+      num_files = tmp.size();
+    } else {
+      // Binary search to find earliest index whose largest key >= ikey.
+      uint32_t index = FindFile(vset_->icmp_, files_[level], ikey);
+      if (index >= num_files) {
+        files = NULL;
+        num_files = 0;
+      } else {
+        tmp2 = files[index];
+        if (ucmp->Compare(user_key, tmp2->smallest.user_key()) < 0) {
+          // All of "tmp2" is past any data for user_key
+          files = NULL;
+          num_files = 0;
+        } else {
+          files = &tmp2;
+          num_files = 1;
+        }
+      }
+    }
+
+    for (uint32_t i = 0; i < num_files; ++i) {
+      if (last_file_read != NULL && stats->seek_file == NULL) {
+        // We have had more than one seek for this read.  Charge the 1st file.
+        stats->seek_file = last_file_read;
+        stats->seek_file_level = last_file_read_level;
+      }
+
+      FileMetaData* f = files[i];
+      last_file_read = f;
+      last_file_read_level = level;
+      std::string value;
+      Saver saver;
+      saver.state = kNotFound;
+      saver.ucmp = ucmp;
+      saver.user_key = user_key;
+      saver.value = &value;
+      s = vset_->table_cache_->Get(options, f->number, f->file_size, ikey,
+                                   &saver, SaveValue);
+      if (!s.ok()) {
+        return true;
+      }
+      switch (saver.state) {
+        case kNotFound:
+          break;  // Keep searching in other files
+        case kFound:
+          return false;
+        case kDeleted:
+          // s = Status::NotFound(Slice());  // Use empty error message for
+          // speed
+          return false;
+        case kCorrupt:
+          // s = Status::Corruption("corrupted key for ", user_key);
+          return false;
+      }
+    }
+  }
+
+  return false;  // Use an empty error message for speed
 }
 
 Status Version::Get(const ReadOptions& options, const LookupKey& k,
@@ -487,14 +660,18 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
   FileMetaData* tmp2;
   for (int level = 0; level < config::kNumLevels; level++) {
     size_t num_files = files_[level].size();
-    if (num_files == 0) continue;
+    // if (num_files == 0) continue;
 
     // Get the list of files to search in this level
     FileMetaData* const* files = &files_[level][0];
     tmp.reserve(num_files);
     for (uint32_t i = 0; i < num_files; i++) {
       FileMetaData* f = files[i];
-      tmp.push_back(f);
+      // revisit
+      if (ucmp->Compare(user_key, Slice(f->smallest_sec.c_str())) >= 0 &&
+          ucmp->Compare(user_key, Slice(f->largest_sec.c_str())) <= 0) {
+        tmp.push_back(f);
+      }
     }
     if (tmp.empty()) continue;
 
@@ -529,6 +706,171 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
   }
 
   // std::sort(acc->begin(), acc->end(), NewestFirstSequenceNumber);
+  if (acc->size() == 0)
+    return Status::NotFound(Slice());  // Use an empty error message for speed
+  else
+    return s;
+}
+
+Status Version::RangeGet(const ReadOptions& options, std::string start_key,
+                         std::string end_key,
+                         std::vector<SecondaryKeyReturnVal>* acc,
+                         GetStats* stats, std::string secondary_key,
+                         int top_k_outputs,
+                         std::unordered_set<std::string>* result_set,
+                         DBImpl* db, SequenceNumber snapshot) {
+  const Comparator* ucmp = vset_->icmp_.user_comparator();
+  Status s;
+
+  stats->seek_file = NULL;
+  stats->seek_file_level = -1;
+
+  std::map<std::string, FileMetaData*> filenoToMetaMap;
+
+  for (int level = 0; level < config::kNumLevels; level++) {
+    size_t num_files = files_[level].size();
+
+    for (uint32_t i = 0; i < num_files; ++i) {
+      filenoToMetaMap.insert(std::pair<std::string, FileMetaData*>(
+          SSTR(files_[level][i]->number), files_[level][i]));
+    }
+  }
+
+  Interval2DTreeWithTopK* itree = this->vset_->table_cache_->GetIntervalTree();
+  std::vector<Interval2DTree> intervals;
+  itree->topK(intervals, start_key, end_key);
+
+  int topkb = 0, topkin = 0;
+  for (std::vector<Interval2DTree>::const_iterator it = intervals.begin();
+       it != intervals.end(); it++) {
+    if ((int)(acc->size()) >= top_k_outputs &&
+        acc->front().sequence_number > it->GetTimeStamp()) {
+      return s;
+    }
+
+    topkb++;
+    std::stringstream ss(it->GetId());
+    std::string item1, item2;
+    std::list<std::string> elems;
+    std::getline(ss, item1, '+');
+    elems.push_back(item1);
+    std::getline(ss, item2);
+    elems.push_back(item2);
+    std::map<std::string, FileMetaData*>::iterator itf;
+    itf = filenoToMetaMap.find(elems.front());
+    if (itf == filenoToMetaMap.end()) continue;
+    FileMetaData* f = itf->second;
+
+    LookupKey blockkey(elems.back(), snapshot);
+
+    if (start_key.compare(end_key) == 0) {
+      LookupKey lkey(start_key, snapshot);
+      SecSaver saver;
+      saver.state = kNotFound;
+      saver.ucmp = ucmp;
+      saver.user_key = start_key;
+      saver.acc = acc;
+      saver.level = 1000;
+      saver.result_set = result_set;
+      s = vset_->table_cache_->Get(options, f->number, f->file_size,
+                                   blockkey.internal_key(), lkey.internal_key(),
+                                   &saver, &SecSaveValue, secondary_key,
+                                   top_k_outputs, db);
+    } else {
+      RangeSecSaver saver;
+      saver.state = kNotFound;
+      saver.ucmp = ucmp;
+      saver.start_user_key = start_key;
+      saver.end_user_key = end_key;
+      saver.acc = acc;
+      saver.level = 1000;
+      saver.result_set = result_set;
+      s = vset_->table_cache_->RangeGet(
+          options, f->number, f->file_size, blockkey.internal_key(), &saver,
+          &RangeSecSaveValue, secondary_key, top_k_outputs, db);
+      if (s.IsIOError()) topkin++;
+    }
+  }
+
+  if (acc->size() == 0)
+    return Status::NotFound(Slice());  // Use an empty error message for speed
+  else
+    return s;
+}
+
+Status Version::EmbeddedRangeGet(const ReadOptions& options,
+                                 std::string start_key, std::string end_key,
+                                 std::vector<SecondaryKeyReturnVal>* acc,
+                                 GetStats* stats, std::string secondary_key,
+                                 int top_k_outputs,
+                                 std::unordered_set<std::string>* result_set,
+                                 DBImpl* db, SequenceNumber snapshot) {
+  const Comparator* ucmp = vset_->icmp_.user_comparator();
+  Status s;
+
+  stats->seek_file = NULL;
+  stats->seek_file_level = -1;
+  FileMetaData* last_file_read = NULL;
+  int last_file_read_level = -1;
+
+  // We can search level-by-level since entries never hop across
+  // levels.  Therefore we are guaranteed that if we find data
+  // in an smaller level, later levels are irrelevant.
+  std::vector<FileMetaData*> tmp;
+  FileMetaData* tmp2;
+  int valueSize = 0;
+  for (int level = 0; level < config::kNumLevels; level++) {
+    size_t num_files = files_[level].size();
+    if (num_files == 0) continue;
+
+    // Get the list of files to search in this level
+    FileMetaData* const* files = &files_[level][0];
+    // if (level == 0) {
+    //  Level-0 files may overlap each other.  Find all files that
+    //  overlap user_key and process them in order from newest to oldest.
+    tmp.reserve(num_files);
+    for (uint32_t i = 0; i < num_files; i++) {
+      FileMetaData* f = files[i];
+      if (start_key.compare(f->largest_sec) > 0 ||
+          end_key.compare(f->smallest_sec) < 0) {
+      } else
+        tmp.push_back(f);
+    }
+    if (tmp.empty()) continue;
+
+    // std::sort(tmp.begin(), tmp.end(), NewestFirst);
+    files = &tmp[0];
+    num_files = tmp.size();
+    for (uint32_t i = 0; i < num_files; ++i) {
+      if (last_file_read != NULL && stats->seek_file == NULL) {
+        // We have had more than one seek for this read.  Charge the 1st file.
+        stats->seek_file = last_file_read;
+        stats->seek_file_level = last_file_read_level;
+      }
+
+      FileMetaData* f = files[i];
+      last_file_read = f;
+      last_file_read_level = level;
+
+      RangeSecSaver saver;
+      saver.state = kNotFound;
+      saver.ucmp = ucmp;
+      saver.start_user_key = start_key;
+      saver.end_user_key = end_key;
+      saver.acc = acc;
+      saver.level = level;
+      saver.result_set = result_set;
+      s = vset_->table_cache_->RangeGet(
+          options, f->number, f->file_size, start_key, end_key, &saver,
+          &RangeSecSaveValue, secondary_key, top_k_outputs, db);
+    }
+
+    if ((int)acc->size() >= top_k_outputs) {
+      return s;
+    }
+
+    tmp.clear();
+  }
   if (acc->size() == 0)
     return Status::NotFound(Slice());  // Use an empty error message for speed
   else
@@ -1223,7 +1565,8 @@ Status VersionSet::WriteSnapshot(log::Writer* log) {
     const std::vector<FileMetaData*>& files = current_->files_[level];
     for (size_t i = 0; i < files.size(); i++) {
       const FileMetaData* f = files[i];
-      edit.AddFile(level, f->number, f->file_size, f->smallest, f->largest);
+      edit.AddFile(level, f->number, f->file_size, f->smallest, f->largest,
+                   f->smallest_sec, f->largest_sec);
     }
   }
 

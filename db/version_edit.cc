@@ -5,6 +5,7 @@
 #include "db/version_edit.h"
 
 #include "db/version_set.h"
+
 #include "util/coding.h"
 
 namespace leveldb {
@@ -81,6 +82,8 @@ void VersionEdit::EncodeTo(std::string* dst) const {
     PutVarint64(dst, f.file_size);
     PutLengthPrefixedSlice(dst, f.smallest.Encode());
     PutLengthPrefixedSlice(dst, f.largest.Encode());
+    PutLengthPrefixedSlice(dst, Slice(f.smallest_sec.c_str()));
+    PutLengthPrefixedSlice(dst, Slice(f.largest_sec.c_str()));
   }
 }
 
@@ -88,6 +91,16 @@ static bool GetInternalKey(Slice* input, InternalKey* dst) {
   Slice str;
   if (GetLengthPrefixedSlice(input, &str)) {
     return dst->DecodeFrom(str);
+  } else {
+    return false;
+  }
+}
+
+static bool GetStringKey(Slice* input, std::string* dst) {
+  Slice str;
+  if (GetLengthPrefixedSlice(input, &str)) {
+    dst->assign(str.data(), str.size());
+    return true;
   } else {
     return false;
   }
@@ -179,7 +192,9 @@ Status VersionEdit::DecodeFrom(const Slice& src) {
         if (GetLevel(&input, &level) && GetVarint64(&input, &f.number) &&
             GetVarint64(&input, &f.file_size) &&
             GetInternalKey(&input, &f.smallest) &&
-            GetInternalKey(&input, &f.largest)) {
+            GetInternalKey(&input, &f.largest) &&
+            GetStringKey(&input, &f.smallest_sec) &&
+            GetStringKey(&input, &f.largest_sec)) {
           new_files_.push_back(std::make_pair(level, f));
         } else {
           msg = "new-file entry";

@@ -150,6 +150,7 @@ struct LEVELDB_EXPORT Options {
   // options for secondary index
   std::string primary_key;
   std::string secondary_key;
+  std::string interval_tree_file_name;
 };
 
 // Options that control read operations

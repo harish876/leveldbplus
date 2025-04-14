@@ -32,6 +32,7 @@ struct Table::Rep {
     delete filter;
     delete[] filter_data;
     delete index_block;
+    delete interval_block;
   }
 
   Options options;
@@ -46,12 +47,20 @@ struct Table::Rep {
 
   BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
   Block* index_block;
+  Block* interval_block;
 };
 
 Status Table::Open(const Options& options, RandomAccessFile* file,
                    uint64_t size, Table** table) {
+  bool isinterval = options.interval_tree_file_name.empty();
+  int footerlength;
+  if (isinterval) {
+    footerlength = Footer::kEncodedLength + BlockHandle::kMaxEncodedLength;
+  } else {
+    footerlength = Footer::kEncodedLength;
+  }
   *table = nullptr;
-  if (size < Footer::kEncodedLength) {
+  if (size < footerlength) {
     return Status::Corruption("file is too short to be an sstable");
   }
 
@@ -62,7 +71,7 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
   if (!s.ok()) return s;
 
   Footer footer;
-  s = footer.DecodeFrom(&footer_input);
+  s = footer.DecodeFrom(&footer_input, isinterval);
   if (!s.ok()) return s;
 
   // Read the index block
@@ -73,6 +82,18 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
   }
   s = ReadBlock(file, opt, footer.index_handle(), &index_block_contents);
 
+  Block* interval_block = NULL;
+  if (isinterval) {
+    BlockContents interval_block_contents;
+    if (s.ok()) {
+      s = ReadBlock(file, ReadOptions(), footer.interval_handle(),
+                    &interval_block_contents);
+      if (s.ok()) {
+        interval_block = new Block(interval_block_contents);
+      }
+    }
+  }
+
   if (s.ok()) {
     // We've successfully read the footer and the index block: we're
     // ready to serve requests.
@@ -82,6 +103,7 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
     rep->file = file;
     rep->metaindex_handle = footer.metaindex_handle();
     rep->index_block = index_block;
+    rep->interval_block = interval_block;
     rep->cache_id = (options.block_cache ? options.block_cache->NewId() : 0);
     rep->filter_data = nullptr;
     rep->filter = nullptr;
@@ -319,6 +341,186 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
     s = iiter->status();
   }
   delete iiter;
+  return s;
+}
+
+Status Table::InternalGet(const ReadOptions& options, const Slice& blockkey,
+                          const Slice& pointkey, void* arg,
+                          bool (*saver)(void*, const Slice&, const Slice&,
+                                        std::string secKey, int topKOutput,
+                                        DBImpl* db),
+                          std::string secKey, int topKOutput, DBImpl* db) {
+  Status s;
+  Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
+  iiter->Seek(blockkey);
+
+  if (iiter->Valid()) {
+    Slice handle_value = iiter->value();
+    FilterBlockReader* filter = rep_->secondary_filter;
+    BlockHandle handle;
+    if (filter != NULL && handle.DecodeFrom(&handle_value).ok() &&
+        !filter->KeyMayMatch(handle.offset(), pointkey)) {
+    } else {
+      Iterator* block_iter = BlockReader(this, options, iiter->value());
+      block_iter->SeekToFirst();
+      while (block_iter->Valid()) {
+        bool f = (*saver)(arg, block_iter->key(), block_iter->value(), secKey,
+                          topKOutput, db);
+        block_iter->Next();
+      }
+      s = block_iter->status();
+      delete block_iter;
+    }
+
+    if (s.ok()) {
+      s = iiter->status();
+    }
+
+  } else
+    s.IOError("");
+
+  delete iiter;
+  return s;
+}
+
+Status Table::RangeInternalGet(const ReadOptions& options, const Slice& k,
+                               void* arg,
+                               bool (*saver)(void*, const Slice&, const Slice&,
+                                             std::string secondary_key,
+                                             int top_k_output, DBImpl* db),
+                               std::string secondary_key, int top_k_output,
+                               DBImpl* db) {
+  Status s;
+  Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
+  iiter->Seek(k);
+  if (iiter->Valid()) {
+    Slice handle_value = iiter->value();
+    FilterBlockReader* filter = rep_->filter;
+    BlockHandle handle;
+    if (filter != NULL && handle.DecodeFrom(&handle_value).ok() &&
+        !filter->KeyMayMatch(handle.offset(), k)) {
+    } else {
+      Iterator* block_iter = BlockReader(this, options, iiter->value());
+      block_iter->SeekToFirst();
+      while (block_iter->Valid()) {
+        bool f = (*saver)(arg, block_iter->key(), block_iter->value(),
+                          secondary_key, top_k_output, db);
+        block_iter->Next();
+      }
+      s = block_iter->status();
+      delete block_iter;
+    }
+  }
+  if (s.ok()) {
+    s = iiter->status();
+  }
+  delete iiter;
+  return s;
+}
+
+Status Table::RangeInternalGetWithInterval(
+    const ReadOptions& options, const Slice& startk, const Slice& endk,
+    void* arg,
+    bool (*saver)(void*, const Slice&, const Slice&, std::string secKey,
+                  int topKOutput, DBImpl* db),
+    std::string secKey, int topKOutput, DBImpl* db) {
+  Status s;
+  Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
+  iiter->SeekToFirst();
+
+  Iterator* iterInterval =
+      rep_->interval_block->NewIterator(rep_->options.comparator);
+  iterInterval->SeekToFirst();
+
+  while (iiter->Valid()) {
+    Slice handle_value = iiter->value();
+    FilterBlockReader* filter = rep_->secondary_filter;
+    BlockHandle handle;
+    Slice key, value;
+    if (iterInterval->Valid()) {
+      key = iterInterval->key();
+      value = iterInterval->value();
+    }
+    if (startk.compare(value) > 0 || endk.compare(key) < 0) {
+    }
+
+    else {
+      Iterator* block_iter = BlockReader(this, options, iiter->value());
+      block_iter->SeekToFirst();
+      while (block_iter->Valid()) {
+        bool f = (*saver)(arg, block_iter->key(), block_iter->value(), secKey,
+                          topKOutput, db);
+        block_iter->Next();
+      }
+      s = block_iter->status();
+      delete block_iter;
+    }
+
+    iiter->Next();
+    iterInterval->Next();
+  }
+
+  if (s.ok()) {
+    s = iiter->status();
+  }
+  delete iiter;
+  delete iterInterval;
+  return s;
+}
+
+Status Table::InternalGetWithInterval(
+    const ReadOptions& options, const Slice& k, void* arg,
+    bool (*saver)(void*, const Slice&, const Slice&, std::string secKey,
+                  int topKOutput, DBImpl* db),
+    std::string secKey, int topKOutput, DBImpl* db) {
+  Status s;
+  Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
+  iiter->SeekToFirst();
+
+  Iterator* iterInterval =
+      rep_->interval_block->NewIterator(rep_->options.comparator);
+  iterInterval->SeekToFirst();
+
+  const char* ks = k.data();
+  Slice sk = Slice(ks, k.size() - 8);
+
+  while (iiter->Valid()) {
+    Slice handle_value = iiter->value();
+    FilterBlockReader* filter = rep_->secondary_filter;
+    BlockHandle handle;
+    Slice key, value;
+    if (iterInterval->Valid()) {
+      key = iterInterval->key();
+      value = iterInterval->value();
+    }
+    if (sk.compare(key) < 0 || sk.compare(value) > 0) {
+    } else if (filter != NULL && handle.DecodeFrom(&handle_value).ok() &&
+               !filter->KeyMayMatch(handle.offset(), k)) {
+    }
+
+    else {
+      Iterator* block_iter = BlockReader(this, options, iiter->value());
+      block_iter->SeekToFirst();
+      while (block_iter->Valid()) {
+        bool f = (*saver)(arg, block_iter->key(), block_iter->value(), secKey,
+                          topKOutput, db);
+
+        block_iter->Next();
+      }
+
+      s = block_iter->status();
+      delete block_iter;
+    }
+
+    iiter->Next();
+    iterInterval->Next();
+  }
+
+  if (s.ok()) {
+    s = iiter->status();
+  }
+  delete iiter;
+  delete iterInterval;
   return s;
 }
 

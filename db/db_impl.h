@@ -50,6 +50,10 @@ class DBImpl : public DB {
   Status Get(const ReadOptions& options, const Slice& s_key,
              std::vector<SecondaryKeyReturnVal>* acc,
              int top_k_outputs) override;
+  bool CheckIfValid(const ReadOptions& options, const Slice& key, int& level);
+  Status RangeGet(const ReadOptions& options, const Slice& start_key,
+                  const Slice& end_key, std::vector<SecondaryKeyReturnVal>* acc,
+                  int top_k_outputs) override;
   Iterator* NewIterator(const ReadOptions&) override;
   const Snapshot* GetSnapshot() override;
   void ReleaseSnapshot(const Snapshot* snapshot) override;

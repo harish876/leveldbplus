@@ -80,6 +80,34 @@ class LEVELDB_EXPORT Table {
                                    DBImpl* db),
                      std::string sec_key, int top_k_output, DBImpl* db);
 
+  Status InternalGet(const ReadOptions& options, const Slice& blockkey,
+                     const Slice& pointkey, void* arg,
+                     bool (*saver)(void*, const Slice&, const Slice&,
+                                   std::string secKey, int topKOutput,
+                                   DBImpl* db),
+                     std::string secKey, int topKOutput, DBImpl* db);
+
+  Status InternalGetWithInterval(const ReadOptions& options, const Slice& k,
+                                 void* arg,
+                                 bool (*saver)(void*, const Slice&,
+                                               const Slice&, std::string secKey,
+                                               int topKOutput, DBImpl* db),
+                                 std::string secKey, int topKOutput,
+                                 DBImpl* db);
+
+  Status RangeInternalGet(const ReadOptions& options, const Slice& k, void* arg,
+                          bool (*saver)(void*, const Slice&, const Slice&,
+                                        std::string secondary_key,
+                                        int top_k_output, DBImpl* db),
+                          std::string sec_key, int top_k_output, DBImpl* db);
+
+  Status RangeInternalGetWithInterval(
+      const ReadOptions& options, const Slice& startk, const Slice& endk,
+      void* arg,
+      bool (*saver)(void*, const Slice&, const Slice&,
+                    std::string secondary_key, int top_k_output, DBImpl* db),
+      std::string sec_key, int top_k_output, DBImpl* db);
+
   void ReadMeta(const Footer& footer);
   void ReadFilter(const Slice& filter_handle_value);
   void ReadSecondaryFilter(const Slice& filter_handle_value);

@@ -8,6 +8,7 @@
 #include "db/filename.h"
 #include "db/table_cache.h"
 #include "db/version_edit.h"
+
 #include "leveldb/db.h"
 #include "leveldb/env.h"
 #include "leveldb/iterator.h"
@@ -28,7 +29,9 @@ Status BuildTable(const std::string& dbname, Env* env, const Options& options,
       return s;
     }
 
-    TableBuilder* builder = new TableBuilder(options, file);
+    TableBuilder* builder =
+        new TableBuilder(options, file, table_cache->GetIntervalTree(),
+                         meta->number, &meta->smallest_sec, &meta->largest_sec);
     meta->smallest.DecodeFrom(iter->key());
     Slice key;
     for (; iter->Valid(); iter->Next()) {

@@ -19,6 +19,8 @@
 #include "leveldb/options.h"
 #include "leveldb/status.h"
 
+#include "util/interval_tree.h"
+
 namespace leveldb {
 
 class BlockBuilder;
@@ -30,7 +32,9 @@ class LEVELDB_EXPORT TableBuilder {
   // Create a builder that will store the contents of the table it is
   // building in *file.  Does not close the file.  It is up to the
   // caller to close the file after calling Finish().
-  TableBuilder(const Options& options, WritableFile* file);
+  TableBuilder(const Options& options, WritableFile* file,
+               Interval2DTreeWithTopK* interval_tree, uint64_t file_number,
+               std::string* minsec, std::string* maxsec);
 
   TableBuilder(const TableBuilder&) = delete;
   TableBuilder& operator=(const TableBuilder&) = delete;
@@ -86,6 +90,12 @@ class LEVELDB_EXPORT TableBuilder {
 
   struct Rep;
   Rep* rep_;
+
+  int count;
+  Interval2DTreeWithTopK* interval_tree_;
+  uint64_t file_number_;
+  std::string* smallest_sec_;
+  std::string* largest_sec_;
 };
 
 }  // namespace leveldb

@@ -4,6 +4,7 @@
 
 #include "leveldb/table_builder.h"
 
+#include "db/dbformat.h"
 #include <cassert>
 #include <sstream>
 
@@ -17,7 +18,12 @@
 #include "table/format.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
+#include "util/interval_tree.h"
 #include "util/json_utils.h"
+
+#define SSTR(x)                                                             \
+  static_cast<std::ostringstream&>((std::ostringstream() << std::dec << x)) \
+      .str()
 
 namespace leveldb {
 
@@ -29,25 +35,32 @@ struct TableBuilder::Rep {
         offset(0),
         data_block(&options),
         index_block(&index_block_options),
+        interval_block(&interval_block_options),
         num_entries(0),
         closed(false),
         filter_block(opt.filter_policy == nullptr
                          ? nullptr
                          : new FilterBlockBuilder(opt.filter_policy)),
-        secondary_filter_block(opt.filter_policy == nullptr
-                                   ? nullptr
-                                   : new FilterBlockBuilder(opt.filter_policy)),
-        pending_index_entry(false) {
+        secondary_filter_block(
+            opt.filter_policy == nullptr
+                ? nullptr
+                : new FilterBlockBuilder(opt.filter_policy)),  // revisit
+        pending_index_entry(false),
+        min_sec_value(""),
+        max_sec_value(""),
+        max_sec_seq_number(0) {
     index_block_options.block_restart_interval = 1;
   }
 
   Options options;
   Options index_block_options;
+  Options interval_block_options;
   WritableFile* file;
   uint64_t offset;
   Status status;
   BlockBuilder data_block;
   BlockBuilder index_block;
+  BlockBuilder interval_block;
   std::string last_key;
   int64_t num_entries;
   bool closed;  // Either Finish() or Abandon() has been called.
@@ -67,9 +80,18 @@ struct TableBuilder::Rep {
   BlockHandle pending_handle;  // Handle to add to index block
 
   std::string compressed_output;
+
+  // Add Min Max and MaxTimestamp secondary attribute value of a Block for
+  // Interval Tree
+  std::string max_sec_value;
+  std::string min_sec_value;
+  uint64_t max_sec_seq_number;
 };
 
-TableBuilder::TableBuilder(const Options& options, WritableFile* file)
+TableBuilder::TableBuilder(const Options& options, WritableFile* file,
+                           Interval2DTreeWithTopK* interval_tree,
+                           uint64_t file_number, std::string* minsec,
+                           std::string* maxsec)
     : rep_(new Rep(options, file)) {
   if (rep_->filter_block != nullptr) {
     rep_->filter_block->StartBlock(0);
@@ -78,6 +100,11 @@ TableBuilder::TableBuilder(const Options& options, WritableFile* file)
   if (rep_->secondary_filter_block != nullptr) {
     rep_->secondary_filter_block->StartBlock(0);
   }
+
+  interval_tree_ = interval_tree;
+  file_number_ = file_number;
+  smallest_sec_ = minsec;
+  largest_sec_ = maxsec;
 }
 
 TableBuilder::~TableBuilder() {
@@ -111,6 +138,32 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   }
 
   if (r->pending_index_entry) {
+    if (!r->options.interval_tree_file_name.empty() && interval_tree_) {
+      interval_tree_->insertInterval(
+          SSTR(file_number_) + "+" +
+              r->last_key.substr(0, r->last_key.size() - 8),
+          r->min_sec_value, r->max_sec_value, r->max_sec_seq_number);
+    } else {
+      Slice value(r->max_sec_value);
+      Slice inKey(r->min_sec_value);
+      r->interval_block.Add(inKey, value);
+    }
+
+    if (smallest_sec_->empty()) {
+      smallest_sec_->assign(r->min_sec_value);
+      largest_sec_->assign(r->max_sec_value);
+    } else {
+      if (this->smallest_sec_->compare(r->min_sec_value) > 0) {
+        this->smallest_sec_->assign(r->min_sec_value);
+      } else if (this->largest_sec_->compare(rep_->max_sec_value) < 0) {
+        this->largest_sec_->assign(r->max_sec_value);
+      }
+    }
+
+    r->min_sec_value.clear();
+    r->max_sec_value.clear();
+    r->max_sec_seq_number = 0;
+
     assert(r->data_block.empty());
     r->options.comparator->FindShortestSeparator(&r->last_key, key);
     std::string handle_encoding;
@@ -130,6 +183,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     std::string secondary_key_attr;
     Status s = ExtractKeyFromJSON(value, r->options.secondary_key,
                                   &secondary_key_attr);
+
     if (!s.ok()) {
       r->last_key.assign(key.data(), key.size());
       r->num_entries++;
@@ -140,7 +194,35 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
       }
       return;
     }
-    r->secondary_filter_block->AddKey(secondary_key_attr);
+    std::string tag = key.ToString().substr(key.size() - 8);
+    std::string sec_keys = secondary_key_attr;
+    Slice Key = sec_keys + tag;
+
+    r->secondary_filter_block->AddKey(Key);
+    // range logic
+    if (rep_->max_sec_value == "" ||
+        rep_->max_sec_value.compare(sec_keys) < 0) {
+      rep_->max_sec_value.assign(sec_keys);
+    }
+    if (rep_->min_sec_value == "" ||
+        rep_->min_sec_value.compare(sec_keys) > 0) {
+      rep_->min_sec_value.assign(sec_keys);
+    }
+    const size_t n = key.size();
+    if (n >= 8) {
+      uint64_t num = DecodeFixed64(key.data() + n - 8);
+      SequenceNumber seq = num >> 8;
+      if (rep_->max_sec_seq_number < seq) {
+        rep_->max_sec_seq_number = seq;
+      }
+    }
+    // ParsedInternalKey parsed_key;
+    // why negation here
+    // if (!ParseInternalKey(key, &parsed_key)) {
+    //   if (rep_->max_sec_seq_number < parsed_key.sequence) {
+    //     rep_->max_sec_seq_number = parsed_key.sequence;
+    //   }
+    // }
   }
 
   r->last_key.assign(key.data(), key.size());
@@ -247,7 +329,8 @@ Status TableBuilder::Finish() {
   assert(!r->closed);
   r->closed = true;
 
-  BlockHandle filter_block_handle, metaindex_block_handle, index_block_handle;
+  BlockHandle filter_block_handle, metaindex_block_handle, index_block_handle,
+      interval_block_handle;
 
   // Write filter block
   if (ok() && r->filter_block != nullptr) {
@@ -274,11 +357,43 @@ Status TableBuilder::Finish() {
   // Write index block
   if (ok()) {
     if (r->pending_index_entry) {
-      r->options.comparator->FindShortSuccessor(&r->last_key);
+      if (!r->options.interval_tree_file_name.empty() && interval_tree_) {
+        interval_tree_->insertInterval(SSTR(file_number_) + "+" + r->last_key,
+                                       rep_->min_sec_value, rep_->max_sec_value,
+                                       rep_->max_sec_seq_number);
+        interval_tree_->sync();
+      } else {
+        Slice value(r->max_sec_value);
+        Slice inKey(r->min_sec_value);
+        r->interval_block.Add(inKey, value);
+      }
+
+      if (smallest_sec_->empty()) {
+        smallest_sec_->assign(r->min_sec_value);
+        largest_sec_->assign(r->max_sec_value);
+      } else {
+        if (this->smallest_sec_->compare(r->min_sec_value) > 0) {
+          this->smallest_sec_->assign(r->min_sec_value);
+        } else if (this->largest_sec_->compare(rep_->max_sec_value) < 0) {
+          this->largest_sec_->assign(r->max_sec_value);
+        }
+      }
+
+      r->min_sec_value.clear();
+      r->max_sec_value.clear();
+      r->max_sec_seq_number = 0;
+
+      // r->options.comparator->FindShortSuccessor(&r->last_key); //?
       std::string handle_encoding;
       r->pending_handle.EncodeTo(&handle_encoding);
       r->index_block.Add(r->last_key, Slice(handle_encoding));
       r->pending_index_entry = false;
+      rep_->min_sec_value.clear();
+      rep_->max_sec_value.clear();
+      rep_->max_sec_seq_number = 0;
+    }
+    if (r->options.interval_tree_file_name.empty()) {
+      WriteBlock(&r->interval_block, &interval_block_handle);
     }
     WriteBlock(&r->index_block, &index_block_handle);
   }
@@ -288,8 +403,12 @@ Status TableBuilder::Finish() {
     Footer footer;
     footer.set_metaindex_handle(metaindex_block_handle);
     footer.set_index_handle(index_block_handle);
+    bool isinterval = r->options.interval_tree_file_name.empty();
+    if (isinterval) {
+      footer.set_interval_handle(interval_block_handle);
+    }
     std::string footer_encoding;
-    footer.EncodeTo(&footer_encoding);
+    footer.EncodeTo(&footer_encoding, isinterval);
     r->status = r->file->Append(footer_encoding);
     if (r->status.ok()) {
       r->offset += footer_encoding.size();
