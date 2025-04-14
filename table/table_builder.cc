@@ -141,6 +141,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   }
 
   if (r->pending_index_entry) {
+    //
     if (!r->options.interval_tree_file_name.empty()) {
       interval_tree_->insertInterval(
           SSTR(file_number_) + "+" +
@@ -179,24 +180,11 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     r->filter_block->AddKey(key);
   }
 
-  if (r->secondary_filter_block != nullptr) {
-    if (r->options.secondary_key.empty()) {
-      return;
-    }
+  if (r->secondary_filter_block != nullptr &&
+      !r->options.secondary_key.empty()) {
     std::string secondary_key_attr;
-    Status s = ExtractKeyFromJSON(value, r->options.secondary_key,
-                                  &secondary_key_attr);
+    ExtractKeyFromJSON(value, r->options.secondary_key, &secondary_key_attr);
 
-    if (!s.ok()) {
-      r->last_key.assign(key.data(), key.size());
-      r->num_entries++;
-      r->data_block.Add(key, value);
-      const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
-      if (estimated_block_size >= r->options.block_size) {
-        Flush();
-      }
-      return;
-    }
     std::string tag = key.ToString().substr(key.size() - 8);
     std::string sec_keys = secondary_key_attr;
     Slice Key = sec_keys + tag;
@@ -377,7 +365,7 @@ Status TableBuilder::Finish() {
   // Write index block
   if (ok()) {
     if (r->pending_index_entry) {
-      if (!r->options.interval_tree_file_name.empty() && interval_tree_) {
+      if (!r->options.interval_tree_file_name.empty()) {
         interval_tree_->insertInterval(
             SSTR(file_number_) + "+" +
                 r->last_key.substr(0, r->last_key.size() - 8),

@@ -1276,7 +1276,7 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& s_key,
     if (top_k_outputs > (int)(acc->size())) {
       s = current->Get(options, lkey, acc, &stats, this->options_.secondary_key,
                        top_k_outputs, &result_set, this);
-      have_stat_update = true;
+      // have_stat_update = true;
     }
     // std::sort_heap(acc->begin(), acc->end(), NewestFirst);
     mutex_.Lock();
@@ -1337,9 +1337,12 @@ Status DBImpl::RangeGet(const ReadOptions& options, const Slice& start_key,
             this->options_.secondary_key, top_k_outputs, &result_set, this,
             snapshot);
       } else {
-        s = current->RangeGet(options, start_key.ToString(), end_key.ToString(),
-                              acc, &stats, this->options_.secondary_key,
-                              top_k_outputs, &result_set, this, snapshot);
+        std::cout << "Are we here chat?" << std::endl;
+        // REMOVE
+        // s = current->RangeGet(options, start_key.ToString(),
+        // end_key.ToString(),
+        //                       acc, &stats, this->options_.secondary_key,
+        //                       top_k_outputs, &result_set, this, snapshot);
       }
     }
     mutex_.Lock();
