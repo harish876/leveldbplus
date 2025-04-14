@@ -39,8 +39,12 @@ TableCache::TableCache(const std::string& dbname, const Options& options,
       dbname_(dbname),
       options_(options),
       cache_(NewLRUCache(entries)) {
-  interval_tree_ = new Interval2DTreeWithTopK(
-      dbname + "/" + options.interval_tree_file_name, true);
+  if (!options.interval_tree_file_name.empty()) {
+    interval_tree_ = new Interval2DTreeWithTopK(
+        dbname + "/" + options.interval_tree_file_name, true);
+  } else {
+    interval_tree_ = nullptr;
+  }
 }
 
 TableCache::~TableCache() { delete cache_; }

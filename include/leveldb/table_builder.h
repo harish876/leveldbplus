@@ -91,7 +91,6 @@ class LEVELDB_EXPORT TableBuilder {
   struct Rep;
   Rep* rep_;
 
-  int count;
   Interval2DTreeWithTopK* interval_tree_;
   uint64_t file_number_;
   std::string* smallest_sec_;

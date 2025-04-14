@@ -111,6 +111,7 @@ TableBuilder::TableBuilder(const Options& options, WritableFile* file,
 TableBuilder::~TableBuilder() {
   assert(rep_->closed);  // Catch errors where caller forgot to call Finish()
   delete rep_->filter_block;
+  delete rep_->secondary_filter_block;
   delete rep_;
 }
 
@@ -140,7 +141,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   }
 
   if (r->pending_index_entry) {
-    if (!r->options.interval_tree_file_name.empty() && interval_tree_) {
+    if (!r->options.interval_tree_file_name.empty()) {
       interval_tree_->insertInterval(
           SSTR(file_number_) + "+" +
               r->last_key.substr(0, r->last_key.size() - 8),
@@ -252,6 +253,9 @@ void TableBuilder::Flush() {
   if (r->filter_block != nullptr) {
     r->filter_block->StartBlock(r->offset);
   }
+  if (r->secondary_filter_block != nullptr) {
+    r->secondary_filter_block->StartBlock(r->offset);
+  }
 }
 
 void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
@@ -357,7 +361,7 @@ Status TableBuilder::Finish() {
       filter_block_handle.EncodeTo(&handle_encoding);
       meta_index_block.Add(key, handle_encoding);
     }
-    if (r->secondary_filter_block != NULL) {
+    if (r->secondary_filter_block != nullptr) {
       // Add mapping from "filter.Name" to location of filter data
       std::string key = "secondaryfilter.";
       key.append(r->options.filter_policy->Name());
@@ -374,9 +378,10 @@ Status TableBuilder::Finish() {
   if (ok()) {
     if (r->pending_index_entry) {
       if (!r->options.interval_tree_file_name.empty() && interval_tree_) {
-        interval_tree_->insertInterval(SSTR(file_number_) + "+" + r->last_key,
-                                       rep_->min_sec_value, rep_->max_sec_value,
-                                       rep_->max_sec_seq_number);
+        interval_tree_->insertInterval(
+            SSTR(file_number_) + "+" +
+                r->last_key.substr(0, r->last_key.size() - 8),
+            r->min_sec_value, r->max_sec_value, r->max_sec_seq_number);
         interval_tree_->sync();
       } else {
         Slice value(r->max_sec_value);
