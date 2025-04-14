@@ -46,35 +46,35 @@ class TableCache {
   // call (*handle_result)(arg, found_key, found_value).
   Status Get(const ReadOptions& options, uint64_t file_number,
              uint64_t file_size, const Slice& k, void* arg,
-             void (*handle_result)(void*, const Slice&, const Slice&));
+             bool (*handle_result)(void*, const Slice&, const Slice&));
 
   Status Get(const ReadOptions& options, uint64_t file_number,
              uint64_t file_size, const Slice& k, void* arg,
              bool (*saver)(void*, const Slice&, const Slice&,
-                           std::string sec_key, int top_k_output, DBImpl* db),
-             std::string secondary_key, int top_k_output, DBImpl* db);
+                           std::string& sec_key, int& top_k_output, DBImpl* db),
+             std::string& secondary_key, int& top_k_output, DBImpl* db);
 
   Status Get(const ReadOptions& options, uint64_t file_number,
              uint64_t file_size, const Slice& k, const Slice& blockkey,
              void* arg,
              bool (*saver)(void*, const Slice&, const Slice&,
-                           std::string sec_key, int top_k_output, DBImpl* db),
-             std::string secondary_key, int top_k_output, DBImpl* db);
+                           std::string& sec_key, int& top_k_output, DBImpl* db),
+             std::string& sec_key, int& top_k_output, DBImpl* db);
 
   Status RangeGet(const ReadOptions& options, uint64_t file_number,
                   uint64_t file_size, const Slice& blockkey, void* arg,
                   bool (*saver)(void*, const Slice&, const Slice&,
-                                std::string secondary_key, int top_k_output,
+                                std::string& sec_key, int& top_k_output,
                                 DBImpl* db),
-                  std::string secondary_key, int top_k_output, DBImpl* db);
+                  std::string& sec_key, int& top_k_output, DBImpl* db);
 
   Status RangeGet(const ReadOptions& options, uint64_t file_number,
                   uint64_t file_size, const Slice& start_key,
                   const Slice& end_key, void* arg,
                   bool (*saver)(void*, const Slice&, const Slice&,
-                                std::string secondary_key, int top_k_output,
+                                std::string& sec_key, int& top_k_output,
                                 DBImpl* db),
-                  std::string secondary_key, int top_k_output, DBImpl* db);
+                  std::string& sec_key, int& top_k_output, DBImpl* db);
 
   // Evict any entry for the specified file number
   void Evict(uint64_t file_number);

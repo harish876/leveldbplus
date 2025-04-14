@@ -143,6 +143,11 @@ class LEVELDB_EXPORT DB {
     return Status::NotSupported("RangeGet not implemented in ModelDB");
   }
 
+  virtual bool CheckIfValid(const ReadOptions& options, const Slice& key,
+                            int& level) {
+    return false;
+  }
+
   // Return a heap-allocated iterator over the contents of the database.
   // The result of NewIterator() is initially invalid (caller must
   // call one of the Seek methods on the iterator before using it).

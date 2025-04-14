@@ -31,6 +31,16 @@ enum CompressionType {
   kZstdCompression = 0x2,
 };
 
+enum ReadType {
+  // NOTE: do not change the values of existing entries, as these are
+  // part of the persistent format on disk.
+  PRead,
+  SRead,
+  SRRead,
+  Write,
+  Meta
+};
+
 // Options to control the behavior of a database (passed to DB::Open)
 struct LEVELDB_EXPORT Options {
   // Create an Options object with default values for all fields.
@@ -168,6 +178,14 @@ struct LEVELDB_EXPORT ReadOptions {
   // not have been released).  If "snapshot" is null, use an implicit
   // snapshot of the state at the beginning of this read operation.
   const Snapshot* snapshot = nullptr;
+
+  ReadType type;
+
+  ReadOptions()
+      : verify_checksums(false),
+        fill_cache(true),
+        type(ReadType::Write),
+        snapshot(NULL) {}
 };
 
 // Options that control write operations

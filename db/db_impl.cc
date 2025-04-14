@@ -1341,9 +1341,7 @@ Status DBImpl::RangeGet(const ReadOptions& options, const Slice& start_key,
                               acc, &stats, this->options_.secondary_key,
                               top_k_outputs, &result_set, this, snapshot);
       }
-      // have_stat_update = true; //?
     }
-    // std::sort_heap(acc->begin(), acc->end(), NewestFirst);
     mutex_.Lock();
   }
 

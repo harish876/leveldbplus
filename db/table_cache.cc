@@ -106,7 +106,7 @@ Iterator* TableCache::NewIterator(const ReadOptions& options,
 
 Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
                        uint64_t file_size, const Slice& k, void* arg,
-                       void (*handle_result)(void*, const Slice&,
+                       bool (*handle_result)(void*, const Slice&,
                                              const Slice&)) {
   Cache::Handle* handle = nullptr;
   Status s = FindTable(file_number, file_size, &handle);
@@ -121,9 +121,9 @@ Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
 Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
                        uint64_t file_size, const Slice& k, void* arg,
                        bool (*saver)(void*, const Slice&, const Slice&,
-                                     std::string secKey, int topKOutput,
+                                     std::string& secKey, int& topKOutput,
                                      DBImpl* db),
-                       std::string secKey, int topKOutput, DBImpl* db) {
+                       std::string& secKey, int& topKOutput, DBImpl* db) {
   Cache::Handle* handle = NULL;
   Status s = FindTable(file_number, file_size, &handle);
   if (s.ok()) {
@@ -145,9 +145,9 @@ Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
                        uint64_t file_size, const Slice& blockKey,
                        const Slice& k, void* arg,
                        bool (*saver)(void*, const Slice&, const Slice&,
-                                     std::string secKey, int topKOutput,
+                                     std::string& secKey, int& topKOutput,
                                      DBImpl* db),
-                       std::string secKey, int topKOutput, DBImpl* db) {
+                       std::string& secKey, int& topKOutput, DBImpl* db) {
   Cache::Handle* handle = NULL;
   Status s = FindTable(file_number, file_size, &handle);
   if (s.ok()) {
@@ -166,9 +166,9 @@ Status TableCache::RangeGet(const ReadOptions& options, uint64_t file_number,
                             uint64_t file_size, const Slice& startk,
                             const Slice& endk, void* arg,
                             bool (*saver)(void*, const Slice&, const Slice&,
-                                          std::string secondary_key,
-                                          int top_k_output, DBImpl* db),
-                            std::string secondary_key, int top_k_output,
+                                          std::string& secondary_key,
+                                          int& top_k_output, DBImpl* db),
+                            std::string& secondary_key, int& top_k_output,
                             DBImpl* db) {
   Cache::Handle* handle = NULL;
   Status s = FindTable(file_number, file_size, &handle);
@@ -188,9 +188,9 @@ Status TableCache::RangeGet(const ReadOptions& options, uint64_t file_number,
                             uint64_t file_size, const Slice& blockkey,
                             void* arg,
                             bool (*saver)(void*, const Slice&, const Slice&,
-                                          std::string secondary_key,
-                                          int top_k_output, DBImpl* db),
-                            std::string secondary_key, int top_k_output,
+                                          std::string& secondary_key,
+                                          int& top_k_output, DBImpl* db),
+                            std::string& secondary_key, int& top_k_output,
                             DBImpl* db) {
   Cache::Handle* handle = NULL;
   Status s = FindTable(file_number, file_size, &handle);

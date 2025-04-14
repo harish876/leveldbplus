@@ -291,7 +291,7 @@ struct RangeSecSaver {
 };
 
 }  // namespace
-static void SaveValue(void* arg, const Slice& ikey, const Slice& v) {
+static bool SaveValue(void* arg, const Slice& ikey, const Slice& v) {
   Saver* s = reinterpret_cast<Saver*>(arg);
   ParsedInternalKey parsed_key;
   if (!ParseInternalKey(ikey, &parsed_key)) {
@@ -301,12 +301,14 @@ static void SaveValue(void* arg, const Slice& ikey, const Slice& v) {
       s->state = (parsed_key.type == kTypeValue) ? kFound : kDeleted;
       if (s->state == kFound) {
         s->value->assign(v.data(), v.size());
+        return true;
       }
     }
   }
+  return false;
 }
 static bool SecSaveValue(void* arg, const Slice& ikey, const Slice& v,
-                         std::string sec_key, int top_k_output, DBImpl* db) {
+                         std::string& sec_key, int& top_k_output, DBImpl* db) {
   SecSaver* s = reinterpret_cast<SecSaver*>(arg);
   ParsedInternalKey parsed_key;
 
@@ -357,7 +359,7 @@ static bool SecSaveValue(void* arg, const Slice& ikey, const Slice& v,
   return false;
 }
 static bool RangeSecSaveValue(void* arg, const Slice& ikey, const Slice& v,
-                              std::string sec_key, int top_k_output,
+                              std::string& sec_key, int& top_k_output,
                               DBImpl* db) {
   RangeSecSaver* s = reinterpret_cast<RangeSecSaver*>(arg);
   ParsedInternalKey parsed_key;
@@ -1989,6 +1991,13 @@ void Compaction::AddInputDeletions(VersionEdit* edit) {
   for (int which = 0; which < 2; which++) {
     for (size_t i = 0; i < inputs_[which].size(); i++) {
       edit->RemoveFile(level_ + which, inputs_[which][i]->number);
+      if (!this->input_version_->vset_->options_->interval_tree_file_name
+               .empty()) {
+        Interval2DTreeWithTopK* itree =
+            input_version_->vset_->table_cache_->GetIntervalTree();
+        itree->deleteAllIntervals(SSTR(inputs_[which][i]->number));
+        itree->sync();
+      }
     }
   }
 }

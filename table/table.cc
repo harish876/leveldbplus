@@ -64,11 +64,14 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
     return Status::Corruption("file is too short to be an sstable");
   }
 
-  char footer_space[Footer::kEncodedLength];
+  char footer_space[footerlength];
   Slice footer_input;
-  Status s = file->Read(size - Footer::kEncodedLength, Footer::kEncodedLength,
-                        &footer_input, footer_space);
+  Status s = file->Read(size - footerlength, footerlength, &footer_input,
+                        footer_space);
   if (!s.ok()) return s;
+
+  ReadOptions roptions;
+  roptions.type = ReadType::Meta;
 
   Footer footer;
   s = footer.DecodeFrom(&footer_input, isinterval);
@@ -77,6 +80,7 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
   // Read the index block
   BlockContents index_block_contents;
   ReadOptions opt;
+  opt.type = ReadType::Meta;
   if (options.paranoid_checks) {
     opt.verify_checksums = true;
   }
@@ -86,7 +90,7 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
   if (isinterval) {
     BlockContents interval_block_contents;
     if (s.ok()) {
-      s = ReadBlock(file, ReadOptions(), footer.interval_handle(),
+      s = ReadBlock(file, roptions, footer.interval_handle(),
                     &interval_block_contents);
       if (s.ok()) {
         interval_block = new Block(interval_block_contents);
@@ -161,6 +165,7 @@ void Table::ReadFilter(const Slice& filter_handle_value) {
   // We might want to unify with ReadBlock() if we start
   // requiring checksum verification in Table::Open.
   ReadOptions opt;
+  opt.type = ReadType::Meta;
   if (rep_->options.paranoid_checks) {
     opt.verify_checksums = true;
   }
@@ -184,6 +189,7 @@ void Table::ReadSecondaryFilter(const Slice& filter_handle_value) {
   // We might want to unify with ReadBlock() if we start
   // requiring checksum verification in Table::Open.
   ReadOptions opt;
+  opt.type = ReadType::Meta;
   BlockContents block;
   if (!ReadBlock(rep_->file, opt, filter_handle, &block).ok()) {
     return;
@@ -200,9 +206,9 @@ Table::~Table() { delete rep_; }
 
 Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
                           bool (*saver)(void*, const Slice&, const Slice&,
-                                        std::string sec_key, int top_k_output,
+                                        std::string& sec_key, int& top_k_output,
                                         DBImpl* db),
-                          std::string sec_key, int top_k_output, DBImpl* db) {
+                          std::string& sec_key, int& top_k_output, DBImpl* db) {
   Status s;
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
   iiter->SeekToFirst();
@@ -315,7 +321,7 @@ Iterator* Table::NewIterator(const ReadOptions& options) const {
 }
 
 Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
-                          void (*handle_result)(void*, const Slice&,
+                          bool (*handle_result)(void*, const Slice&,
                                                 const Slice&)) {
   Status s;
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
@@ -347,9 +353,9 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
 Status Table::InternalGet(const ReadOptions& options, const Slice& blockkey,
                           const Slice& pointkey, void* arg,
                           bool (*saver)(void*, const Slice&, const Slice&,
-                                        std::string secKey, int topKOutput,
+                                        std::string& secKey, int& topKOutput,
                                         DBImpl* db),
-                          std::string secKey, int topKOutput, DBImpl* db) {
+                          std::string& secKey, int& topKOutput, DBImpl* db) {
   Status s;
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
   iiter->Seek(blockkey);
@@ -386,9 +392,9 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& blockkey,
 Status Table::RangeInternalGet(const ReadOptions& options, const Slice& k,
                                void* arg,
                                bool (*saver)(void*, const Slice&, const Slice&,
-                                             std::string secondary_key,
-                                             int top_k_output, DBImpl* db),
-                               std::string secondary_key, int top_k_output,
+                                             std::string& secondary_key,
+                                             int& top_k_output, DBImpl* db),
+                               std::string& secondary_key, int& top_k_output,
                                DBImpl* db) {
   Status s;
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
@@ -421,9 +427,9 @@ Status Table::RangeInternalGet(const ReadOptions& options, const Slice& k,
 Status Table::RangeInternalGetWithInterval(
     const ReadOptions& options, const Slice& startk, const Slice& endk,
     void* arg,
-    bool (*saver)(void*, const Slice&, const Slice&, std::string secKey,
-                  int topKOutput, DBImpl* db),
-    std::string secKey, int topKOutput, DBImpl* db) {
+    bool (*saver)(void*, const Slice&, const Slice&, std::string& secKey,
+                  int& topKOutput, DBImpl* db),
+    std::string& secKey, int& topKOutput, DBImpl* db) {
   Status s;
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
   iiter->SeekToFirst();
@@ -470,9 +476,9 @@ Status Table::RangeInternalGetWithInterval(
 
 Status Table::InternalGetWithInterval(
     const ReadOptions& options, const Slice& k, void* arg,
-    bool (*saver)(void*, const Slice&, const Slice&, std::string secKey,
-                  int topKOutput, DBImpl* db),
-    std::string secKey, int topKOutput, DBImpl* db) {
+    bool (*saver)(void*, const Slice&, const Slice&, std::string& secKey,
+                  int& topKOutput, DBImpl* db),
+    std::string& secKey, int& topKOutput, DBImpl* db) {
   Status s;
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
   iiter->SeekToFirst();

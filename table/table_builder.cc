@@ -50,6 +50,7 @@ struct TableBuilder::Rep {
         max_sec_value(""),
         max_sec_seq_number(0) {
     index_block_options.block_restart_interval = 1;
+    interval_block_options.block_restart_interval = 1;
   }
 
   Options options;
@@ -126,6 +127,7 @@ Status TableBuilder::ChangeOptions(const Options& options) {
   rep_->options = options;
   rep_->index_block_options = options;
   rep_->index_block_options.block_restart_interval = 1;
+  rep_->interval_block_options.block_restart_interval = 1;
   return Status::OK();
 }
 
@@ -208,14 +210,6 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
         rep_->min_sec_value.compare(sec_keys) > 0) {
       rep_->min_sec_value.assign(sec_keys);
     }
-    const size_t n = key.size();
-    if (n >= 8) {
-      uint64_t num = DecodeFixed64(key.data() + n - 8);
-      SequenceNumber seq = num >> 8;
-      if (rep_->max_sec_seq_number < seq) {
-        rep_->max_sec_seq_number = seq;
-      }
-    }
     // ParsedInternalKey parsed_key;
     // why negation here
     // if (!ParseInternalKey(key, &parsed_key)) {
@@ -228,6 +222,15 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   r->last_key.assign(key.data(), key.size());
   r->num_entries++;
   r->data_block.Add(key, value);
+
+  const size_t n = key.size();
+  if (n >= 8) {
+    uint64_t num = DecodeFixed64(key.data() + n - 8);
+    SequenceNumber seq = num >> 8;
+    if (rep_->max_sec_seq_number < seq) {
+      rep_->max_sec_seq_number = seq;
+    }
+  }
 
   const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
   if (estimated_block_size >= r->options.block_size) {
@@ -329,13 +332,18 @@ Status TableBuilder::Finish() {
   assert(!r->closed);
   r->closed = true;
 
-  BlockHandle filter_block_handle, metaindex_block_handle, index_block_handle,
-      interval_block_handle;
+  BlockHandle filter_block_handle, secondary_filter_block_handle,
+      metaindex_block_handle, index_block_handle, interval_block_handle;
 
   // Write filter block
   if (ok() && r->filter_block != nullptr) {
     WriteRawBlock(r->filter_block->Finish(), kNoCompression,
                   &filter_block_handle);
+  }
+  // Write Secondary Filer Block
+  if (ok() && r->secondary_filter_block != NULL) {
+    WriteRawBlock(r->secondary_filter_block->Finish(), kNoCompression,
+                  &secondary_filter_block_handle);
   }
 
   // Write metaindex block
@@ -347,6 +355,14 @@ Status TableBuilder::Finish() {
       key.append(r->options.filter_policy->Name());
       std::string handle_encoding;
       filter_block_handle.EncodeTo(&handle_encoding);
+      meta_index_block.Add(key, handle_encoding);
+    }
+    if (r->secondary_filter_block != NULL) {
+      // Add mapping from "filter.Name" to location of filter data
+      std::string key = "secondaryfilter.";
+      key.append(r->options.filter_policy->Name());
+      std::string handle_encoding;
+      secondary_filter_block_handle.EncodeTo(&handle_encoding);
       meta_index_block.Add(key, handle_encoding);
     }
 
@@ -388,9 +404,6 @@ Status TableBuilder::Finish() {
       r->pending_handle.EncodeTo(&handle_encoding);
       r->index_block.Add(r->last_key, Slice(handle_encoding));
       r->pending_index_entry = false;
-      rep_->min_sec_value.clear();
-      rep_->max_sec_value.clear();
-      rep_->max_sec_seq_number = 0;
     }
     if (r->options.interval_tree_file_name.empty()) {
       WriteBlock(&r->interval_block, &interval_block_handle);
